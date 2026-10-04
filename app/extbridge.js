@@ -1,5 +1,6 @@
 // Talks to the Chrome extension's content script on this page.
 import { PIDS, titleOf, priceFor, mergedListing } from "./model.js";
+import { loadPhotos } from "./store.js";
 
 let ready = false;
 const listeners = new Set();
@@ -16,14 +17,15 @@ window.addEventListener("message", (e) => {
 });
 window.postMessage({ source: "resell-lister-app", type: "ping" }, location.origin);
 
-export function sendToExtension(item) {
+export async function sendToExtension(item) {
+  if (!ready) throw new Error("The Resell Lister extension isn't installed in this browser.");
+  await loadPhotos(item);
   return new Promise((resolve, reject) => {
-    if (!ready) return reject(new Error("The Resell Lister extension isn't installed in this browser."));
     const chosen = PIDS.filter((p) => item.marketplaces?.[p]);
     const payload = {
       id: item.id,
       title: titleOf(item),
-      photos: item.photos.map((p) => p.dataUrl),
+      photos: item.photos.map((p) => p.dataUrl).filter(Boolean),
       price: item.overview.price,
       prices: Object.fromEntries(chosen.map((p) => [p, priceFor(item, p)])),
       listing: Object.fromEntries(chosen.map((p) => [p, mergedListing(item, p)])),

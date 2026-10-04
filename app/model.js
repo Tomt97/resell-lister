@@ -59,21 +59,41 @@ export const DEFAULT_FEES = {
   vinted: { pct: 0, fixed: 0 },
 };
 
-// ---------- settings (this browser only) ----------
+// When a listing counts as stale. eBay "Good 'Til Cancelled" listings renew by themselves,
+// so eBay reminders start off; switch them on in Settings if you like to refresh eBay too.
+export const DEFAULT_RELIST = {
+  ebay: { on: false, days: 60 },
+  poshmark: { on: true, days: 30 },
+  vinted: { on: true, days: 21 },
+};
+
+export const AI_MODELS = {
+  "claude-opus-5-5": "Claude Opus 5.5 (best results, about 5 to 15 cents an item)",
+  "claude-sonnet-5-5": "Claude Sonnet 5.5 (about half the cost)",
+};
+
+// Settings shared by the household (fees, relist rules) come from the cloud; the rest stay on this device.
+let shared = {};
+export const setSharedSettings = (s) => { shared = s || {}; };
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function safeSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 export const settings = {
   get apiKey() { return safeGet("rl.apiKey") || ""; },
   set apiKey(v) { safeSet("rl.apiKey", v); },
+  get model() { const m = safeGet("rl.model"); return AI_MODELS[m] ? m : "claude-opus-5-5"; },
+  set model(v) { safeSet("rl.model", v); },
   get fees() {
-    try {
-      const saved = JSON.parse(safeGet("rl.fees") || "{}");
-      return Object.fromEntries(PIDS.map((p) => [p, { ...DEFAULT_FEES[p], ...(saved[p] || {}) }]));
-    } catch { return structuredClone(DEFAULT_FEES); }
+    const saved = shared.fees || {};
+    return Object.fromEntries(PIDS.map((p) => [p, { ...DEFAULT_FEES[p], ...(saved[p] || {}) }]));
   },
-  set fees(v) { safeSet("rl.fees", JSON.stringify(v)); },
+  get relist() {
+    const saved = shared.relist || {};
+    return Object.fromEntries(PIDS.map((p) => [p, { ...DEFAULT_RELIST[p], ...(saved[p] || {}) }]));
+  },
   get descStyle() { return safeGet("rl.descStyle") || "friendly"; },
   set descStyle(v) { safeSet("rl.descStyle", v); },
+  get person() { return safeGet("rl.person") || "all"; },
+  set person(v) { safeSet("rl.person", v); },
 };
 
 export const uid = () =>
@@ -98,12 +118,24 @@ export function blankItem() {
     ai: null,
     market: Object.fromEntries(PIDS.map((p) => [p, {}])),
     listings: blankListings(),
+    ownerUid: "",
+    createdBy: "",
+    history: [],
   };
 }
 
 // Items saved by the first version of the app had one listing per platform and no overview.
 export function migrate(item) {
-  if (!item || item.version === 2) return item;
+  if (!item) return item;
+  if (item.version === 2) {
+    item.history ??= [];
+    item.ownerUid ??= item.createdBy || "";
+    item.labels ??= [];
+    item.photos ??= [];
+    item.market ??= Object.fromEntries(PIDS.map((p) => [p, {}]));
+    item.listings ??= blankListings();
+    return item;
+  }
   const next = blankItem();
   const L = item.listing || {};
   const first = L.ebay || L.poshmark || L.vinted || {};
@@ -159,10 +191,52 @@ export function itemStatus(item) {
 export const stillListedAfterSale = (item) =>
   itemStatus(item) === "sold" ? PIDS.filter((p) => statusOf(item, p) === "listed") : [];
 
+// ---------- relisting ----------
+const DAY = 864e5;
+export const daysListed = (l) => (l?.relistedAt || l?.listedAt ? Math.floor((Date.now() - (l.relistedAt || l.listedAt)) / DAY) : 0);
+
+// Marketplaces where this item has been sitting too long without a sale.
+export function staleListings(item, rules = settings.relist) {
+  if (itemStatus(item) === "sold") return [];
+  return PIDS.filter((p) => {
+    const l = item.listings?.[p];
+    return l?.status === "listed" && rules[p]?.on && (l.relistedAt || l.listedAt) && daysListed(l) >= rules[p].days;
+  });
+}
+
+export function staleText(item, pid) {
+  const l = item.listings[pid];
+  const bits = [`${daysListed(l)} days`];
+  if (l.views !== undefined && l.views !== "") bits.push(`${l.views} views`);
+  if (l.likes !== undefined && l.likes !== "") bits.push(`${l.likes} likes`);
+  return `Stale on ${PLATFORMS[pid].name} (${bits.join(", ")}): relist or drop the price`;
+}
+
+// Free ways to get a stale listing seen again.
+export const RELIST_TIPS = {
+  ebay: [
+    "Send an offer to watchers (free).",
+    "Lower the price.",
+    "Or refresh it: use \"Sell similar\" to make a new copy, then end the old listing.",
+  ],
+  poshmark: [
+    "Share the listing (free). Sharing other people's listings helps too.",
+    "Drop the price by at least 10% so people who liked it get notified.",
+    "Send an offer to likers.",
+    "Or relist: copy the listing as a new one, then delete the old one.",
+  ],
+  vinted: [
+    "Bumps cost money on Vinted, so try the free options first.",
+    "Lower the price, or refresh the photos and title.",
+    "Some sellers delete and upload again. Check Vinted's rules first.",
+  ],
+};
+
 export function attentionReasons(item) {
   const reasons = [];
   const stale = stillListedAfterSale(item);
   if (stale.length) reasons.push(`Sold - remove it from ${stale.map((p) => PLATFORMS[p].name).join(" and ")}`);
+  for (const p of staleListings(item)) reasons.push(staleText(item, p));
   const st = itemStatus(item);
   if (st === "draft") {
     if (!item.photos.length) reasons.push("Add photos");
@@ -190,7 +264,10 @@ export function salesOf(items, fees = settings.fees) {
     const price = +(l.soldPrice || priceFor(it, pid)) || 0;
     const net = netAfterFees(pid, price, fees) ?? 0;
     const cost = +it.overview.cost || 0;
-    rows.push({ item: it, pid, soldAt: l.soldAt || it.updatedAt, price, fees: price - net, cost, profit: net - cost });
+    const soldAt = l.soldAt || it.updatedAt;
+    const firstListed = Math.min(...PIDS.map((p) => it.listings[p]?.listedAt || Infinity));
+    const daysToSell = Number.isFinite(firstListed) ? Math.max(0, Math.round((soldAt - firstListed) / 864e5)) : null;
+    rows.push({ item: it, pid, soldAt, price, fees: price - net, cost, profit: net - cost, ownerUid: it.ownerUid || "", daysToSell });
   }
   return rows.sort((a, b) => b.soldAt - a.soldAt);
 }
@@ -204,7 +281,11 @@ export const money = (n) =>
 export function setListingStatus(item, pid, status, { soldPrice, soldAt } = {}) {
   const prev = item.listings[pid] || { status: "none" };
   const next = { ...prev, status };
-  if (status === "listed" && prev.status !== "listed") next.listedAt = Date.now();
+  if (status === "listed" && prev.status !== "listed") {
+    // A fresh listing: restart the clock and the view/like counts.
+    next.listedAt = Date.now();
+    delete next.relistedAt; delete next.views; delete next.likes; delete next.statsAt;
+  }
   if (status === "sold") {
     next.soldAt = soldAt || prev.soldAt || Date.now();
     next.soldPrice = soldPrice ?? prev.soldPrice ?? priceFor(item, pid);
@@ -224,6 +305,36 @@ export function copyOfItem(item) {
   copy.createdAt = copy.updatedAt = Date.now();
   copy.overview.sku = "";
   copy.listings = Object.fromEntries(PIDS.map((p) => [p, { status: "none" }]));
+  copy.history = [];
   copy.favorite = false;
   return copy;
 }
+
+export function markRelisted(item, pid) {
+  const l = { ...item.listings[pid] };
+  l.relistedAt = Date.now();
+  l.relistCount = (l.relistCount || 0) + 1;
+  delete l.views; delete l.likes; delete l.statsAt;
+  item.listings = { ...item.listings, [pid]: l };
+}
+
+// A drop of at least 10%, rounded down to whole dollars from $10 up (Poshmark notifies likers at 10%+).
+export function droppedPrice(price) {
+  const p = +price;
+  if (!Number.isFinite(p) || p <= 0) return null;
+  const raw = p * 0.9;
+  return p >= 10 ? String(Math.floor(raw)) : (Math.floor(raw * 100) / 100).toFixed(2);
+}
+
+export function setListingStats(item, pid, views, likes) {
+  const l = { ...item.listings[pid], statsAt: Date.now() };
+  l.views = views === "" ? "" : Math.max(0, Math.round(+views) || 0);
+  l.likes = likes === "" ? "" : Math.max(0, Math.round(+likes) || 0);
+  item.listings = { ...item.listings, [pid]: l };
+}
+
+// ---------- people ----------
+// Fixed order so each person keeps their color (validated categorical palette, slots 1-4).
+export const PERSON_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#4a3aa7"];
+export const initials = (name) => (String(name || "?").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2) || "?").toUpperCase();
+export const matchesPerson = (item, person) => person === "all" || item.ownerUid === person;

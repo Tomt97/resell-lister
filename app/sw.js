@@ -1,6 +1,6 @@
 // Offline shell. Network first so updates show up on the next open.
-const CACHE = "resell-lister-v2";
-const SHELL = ["./", "index.html", "styles.css", "app.js", "ai.js", "db.js", "model.js", "ui.js", "extbridge.js", "views/home.js", "views/inventory.js", "views/item.js", "views/analytics.js", "views/settings.js", "vendor/anthropic-sdk.js", "manifest.webmanifest"];
+const CACHE = "resell-lister-v3";
+const SHELL = ["./", "index.html", "styles.css", "app.js", "ai.js", "store.js", "local.js", "pending.js", "config.js", "model.js", "ui.js", "extbridge.js", "views/home.js", "views/inventory.js", "views/item.js", "views/analytics.js", "views/settings.js", "views/auth.js", "views/people.js", "vendor/anthropic-sdk.js", "vendor/firebase.js", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

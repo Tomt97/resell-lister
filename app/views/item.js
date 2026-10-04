@@ -1,19 +1,24 @@
-// Item form, in the same order as the listing flow: marketplaces, photos + AI,
+// Item form, in the same order as the listing flow: owner and marketplaces, photos + AI,
 // item overview, item details, private info, then each marketplace's own details.
-// Changes save automatically.
-import { putItem, deleteItem, onBeforeLeave } from "../db.js";
+// Changes save automatically, and only the fields you changed are written, so two people
+// working on different parts of an item don't overwrite each other.
+import * as store from "../store.js";
+import { onBeforeLeave } from "../pending.js";
 import {
-  PLATFORMS, PIDS, CONDITIONS, LISTING_STATUS, MAX_PHOTOS, settings, titleOf, priceFor, valueFor, statusOf,
-  setListingStatus, netAfterFees, money, uid, copyOfItem,
+  PLATFORMS, PIDS, CONDITIONS, LISTING_STATUS, MAX_PHOTOS, RELIST_TIPS, settings, titleOf, priceFor, valueFor, statusOf,
+  setListingStatus, markRelisted, droppedPrice, setListingStats, staleListings, daysListed, netAfterFees, money, copyOfItem,
 } from "../model.js";
 import { writeListings, applyAi, DESCRIPTION_STYLES } from "../ai.js";
-import { esc, toast, copyText, modal, toDateInput, fromDateInput } from "../ui.js";
+import { esc, toast, copyText, modal, toDateInput, fromDateInput, fmtDate } from "../ui.js";
 import { sendToExtension, extensionReady, onExtensionReady } from "../extbridge.js";
+import { members, nameOf } from "./people.js";
 
 const STYLE_LABELS = { friendly: "Friendly", short: "Short & simple", detailed: "Detailed" };
+// Every field the AI rewrites, so a regenerate saves all of them.
+const AI_PATHS = ["overview.title", "overview.description", "overview.condition", "overview.price", "details", "market", "ai"];
 
-// Shrink photos so they store well and stay inside Claude's preferred image size.
-async function fileToPhoto(file, maxSide = 1568) {
+// Shrink photos: small enough for the free storage (about 150 KB each), sharp enough for listings and the AI.
+async function fileToDataUrl(file, maxSide = 1280, quality = 0.8) {
   const url = URL.createObjectURL(file);
   try {
     const img = new Image();
@@ -24,50 +29,99 @@ async function fileToPhoto(file, maxSide = 1568) {
     canvas.width = Math.round(img.naturalWidth * scale);
     canvas.height = Math.round(img.naturalHeight * scale);
     canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-    return { id: uid(), dataUrl: canvas.toDataURL("image/jpeg", 0.85) };
+    return canvas.toDataURL("image/jpeg", quality);
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+async function thumbOf(dataUrl) {
+  const img = new Image();
+  img.src = dataUrl;
+  await img.decode();
+  const scale = Math.min(1, 320 / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.7);
 }
 
 export function renderItem($view, item, isNew) {
   let tab = PIDS.find((p) => item.marketplaces[p]) || PIDS[0];
   let busy = false;
   let saveTimer = null;
-  let saved = !isNew;
+  let saving = Promise.resolve();
+  let photosLoading = !isNew && item.photos.some((p) => !p.dataUrl);
+  let remoteChange = null;
+  let knownUpdatedAt = item.updatedAt;
+  const dirty = new Set();
+  const many = members().length > 1;
 
   // ---------- saving ----------
   const hasContent = () => item.photos.length || item.overview.title || item.overview.price || item.aiNotes;
-  const saveNow = async () => {
+  const setSaveState = (t) => { const s = document.getElementById("saveState"); if (s) s.textContent = t; };
+  const doSave = async (hist) => {
     clearTimeout(saveTimer);
     if (isNew && !hasContent()) return;
-    await putItem(item);
-    item.updatedAt = Date.now();
-    if (isNew) {
-      isNew = false;
-      history.replaceState(null, "", `#/item/${encodeURIComponent(item.id)}`);
-      // replaceState doesn't fire hashchange, so move the nav highlight from "Add item" ourselves.
-      document.querySelectorAll("[data-nav]").forEach((a) => {
-        const on = a.dataset.nav === "inventory";
-        a.classList.toggle("active", on);
-        on ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current");
-      });
+    try {
+      if (isNew) {
+        item.history = [{ at: Date.now(), by: store.myUid(), act: "created" }];
+        await store.putItem(item);
+        isNew = false;
+        dirty.clear();
+        history.replaceState(null, "", `#/item/${encodeURIComponent(item.id)}`);
+        // replaceState doesn't fire hashchange, so move the nav highlight from "Add item" ourselves.
+        document.querySelectorAll("[data-nav]").forEach((a) => {
+          const on = a.dataset.nav === "inventory";
+          a.classList.toggle("active", on);
+          on ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current");
+        });
+        if (hist) await store.saveFields(item, [], hist);
+      } else if (dirty.size || hist) {
+        const paths = [...dirty];
+        dirty.clear();
+        await store.saveFields(item, paths, hist);
+      }
+      knownUpdatedAt = item.updatedAt;
+      setSaveState("All changes saved");
+    } catch (err) {
+      setSaveState("Not saved");
+      toast(`Couldn't save: ${err.message}`, 6000);
     }
-    saved = true;
-    const s = document.getElementById("saveState");
-    if (s) s.textContent = "All changes saved";
   };
+  // Saves run one after another, never in parallel.
+  const saveNow = (hist) => (saving = saving.then(() => doSave(hist)));
   const saveSoon = () => {
-    saved = false;
-    const s = document.getElementById("saveState");
-    if (s) s.textContent = "Saving…";
+    setSaveState("Saving…");
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveNow, 500);
+    saveTimer = setTimeout(() => saveNow(), 500);
   };
-  // Finish a pending save before another page reads the items (and when the tab closes).
-  const flush = () => (saved ? undefined : saveNow());
-  onBeforeLeave(flush);
-  window.addEventListener("pagehide", flush, { once: true });
+  const mark = (...paths) => paths.forEach((p) => dirty.add(p));
+
+  // Finish a pending save before another page reads the items, and stop watching for changes.
+  let offChange = () => {};
+  const leave = () => { offChange(); return dirty.size || saveTimer ? saveNow() : saving; };
+  onBeforeLeave(leave);
+  window.addEventListener("pagehide", () => saveNow(), { once: true });
+
+  // Someone else changed this item while it's open: offer to load their version.
+  offChange = store.onChange(async (what) => {
+    if (what !== "items" || isNew) return;
+    const fresh = await store.getItem(item.id);
+    if (!fresh) { remoteChange = "deleted"; return showRemote(); }
+    if (fresh.updatedAt > knownUpdatedAt && fresh.updatedBy !== store.myUid()) {
+      remoteChange = nameOf(fresh.updatedBy);
+      showRemote();
+    }
+  });
+  const showRemote = () => {
+    const el = document.getElementById("remoteBanner");
+    if (!el) return;
+    el.hidden = false;
+    el.querySelector("span").textContent = remoteChange === "deleted"
+      ? "This item was deleted by someone else in the household."
+      : `${remoteChange} just changed this item.`;
+  };
 
   // ---------- drawing ----------
   const draw = () => {
@@ -81,22 +135,27 @@ export function renderItem($view, item, isNew) {
         <h1>${isNew ? "Add item" : esc(titleOf(item))}</h1>
         <span class="muted small" id="saveState">${isNew ? "Not saved yet" : "All changes saved"}</span>
       </div>
+      <div class="alert" id="remoteBanner" hidden role="status"><span></span> <button id="reload" class="tiny">Show latest</button></div>
 
       <section class="card">
-        <h2>Marketplaces</h2>
-        <p class="muted small">Where you want to list this item.</p>
-        <div class="chips-row">${PIDS.map((p) => `
-          <label class="chip-toggle"><input type="checkbox" data-mp="${p}" ${item.marketplaces[p] ? "checked" : ""}> ${PLATFORMS[p].name}</label>`).join("")}
+        <div class="row">
+          ${many ? `<div class="grow"><label for="owner">Belongs to</label>
+            <select id="owner">${members().map((m) => `<option value="${esc(m.uid)}" ${m.uid === item.ownerUid ? "selected" : ""}>${esc(m.name)}${m.uid === store.myUid() ? " (me)" : ""}</option>`).join("")}
+              ${item.ownerUid && !members().some((m) => m.uid === item.ownerUid) ? `<option value="${esc(item.ownerUid)}" selected>Former member</option>` : ""}</select></div>` : ""}
+          <div class="grow" style="flex-basis:260px"><span class="label-like">Marketplaces</span>
+            <div class="chips-row">${PIDS.map((p) => `
+              <label class="chip-toggle"><input type="checkbox" data-mp="${p}" ${item.marketplaces[p] ? "checked" : ""}> ${PLATFORMS[p].name}</label>`).join("")}
+            </div></div>
         </div>
       </section>
 
       <section class="card">
         <div class="section-head"><h2>Photos</h2><span class="muted small">${item.photos.length}/${MAX_PHOTOS} · first photo is the cover</span></div>
         <div class="drop" id="drop" tabindex="0" role="button" aria-label="Add photos">
-          <strong>Add photos</strong><span class="small">Tap to choose, or drag them here. Include the brand and size tags, and any flaws.</span>
+          <strong>Add photos</strong><span class="small">Take or choose photos. Include the brand and size tags, and any flaws.</span>
           <input id="file" type="file" accept="image/*" multiple hidden>
         </div>
-        ${item.photos.length ? `<div class="thumbs">${item.photos.map((p, i) => `
+        ${photosLoading ? `<p class="muted small">Loading photos…</p>` : item.photos.length ? `<div class="thumbs">${item.photos.map((p, i) => `
           <div class="thumb">
             <img src="${esc(p.dataUrl)}" alt="Photo ${i + 1}">
             ${i === 0 ? `<span class="cover">Cover</span>` : ""}
@@ -115,9 +174,10 @@ export function renderItem($view, item, isNew) {
           <div class="row">
             <label class="inline" for="style">Description style</label>
             <select id="style" class="auto">${Object.keys(DESCRIPTION_STYLES).map((k) => `<option value="${k}" ${k === settings.descStyle ? "selected" : ""}>${STYLE_LABELS[k]}</option>`).join("")}</select>
-            <button class="ai-btn" id="gen" ${busy ? "disabled" : ""}>${busy ? `<span class="spinner"></span> Generating…` : ai ? "Regenerate listing" : "Generate listing"}</button>
+            <button class="ai-btn" id="gen" ${busy || photosLoading ? "disabled" : ""}>${busy ? `<span class="spinner"></span> Generating…` : ai ? "Regenerate listing" : "Generate listing"}</button>
           </div>
-          ${!settings.apiKey ? `<p class="small">First add your Claude API key in <a href="#/settings">Settings</a>.</p>` : `<p class="small muted">Costs about 2 to 5 cents on your Claude API key.</p>`}
+          ${!settings.apiKey ? `<p class="small">First add a Claude API key in <a href="#/settings">Settings</a>. Everything else in the app works without it.</p>`
+            : `<p class="small muted">Uses the Claude API key on this device: roughly ${settings.model === "claude-sonnet-5-5" ? "3 to 8" : "5 to 15"} cents per item (more photos cost more).</p>`}
           ${ai ? `
           <div class="ai-result">
             <div><span class="muted small">AI price idea</span><b>${money(ai.pricing?.suggested_price)}</b><span class="small muted">quick sale ${money(ai.pricing?.quick_sale_price)} · ${esc(ai.pricing?.confidence)} confidence</span></div>
@@ -157,9 +217,10 @@ export function renderItem($view, item, isNew) {
       </section>
 
       <section class="card">
-        <h2>Only you see this</h2>
+        <h2>Private</h2>
+        <p class="muted small">Never posted to a marketplace. Everyone in your household can see it.</p>
         <label for="privateNotes">Private notes</label>
-        <textarea id="privateNotes" data-path="privateNotes" rows="2" placeholder="Where you bought it, storage bin, anything for you only">${esc(item.privateNotes)}</textarea>
+        <textarea id="privateNotes" data-path="privateNotes" rows="2" placeholder="Where you bought it, storage bin, anything for the household only">${esc(item.privateNotes)}</textarea>
         <label for="labels">Labels (comma-separated)</label>
         <input id="labels" value="${esc((item.labels || []).join(", "))}" placeholder="e.g. Summer, Bin 3, Consigned">
       </section>
@@ -168,7 +229,7 @@ export function renderItem($view, item, isNew) {
       <section class="card">
         <h2>Marketplace details</h2>
         <p class="muted small">Blank fields use the item overview and details (shown in grey). Copy buttons copy exactly what will be posted.</p>
-        <div class="tabs" role="tablist">${chosen.map((p) => `<button role="tab" aria-selected="${p === tab}" data-tab="${p}" class="${p === tab ? "on" : ""}">${PLATFORMS[p].name} <span class="pill-mini s-${statusOf(item, p)}">${LISTING_STATUS[statusOf(item, p)]}</span></button>`).join("")}</div>
+        <div class="tabs" role="tablist">${chosen.map((p) => `<button role="tab" aria-selected="${p === tab}" data-tab="${p}" class="${p === tab ? "on" : ""}">${PLATFORMS[p].name} <span class="pill-mini s-${statusOf(item, p)} ${staleListings(item).includes(p) ? "stale" : ""}">${staleListings(item).includes(p) ? "Relist" : LISTING_STATUS[statusOf(item, p)]}</span></button>`).join("")}</div>
         ${marketPanel(tab)}
       </section>` : `<section class="card"><p class="muted">Pick at least one marketplace above.</p></section>`}
 
@@ -177,9 +238,10 @@ export function renderItem($view, item, isNew) {
         <button id="send" ${!chosen.length ? "disabled" : ""}>Send to extension</button>
         ${!isNew ? `<button id="copyItem">Copy item</button><button class="danger" id="del">Delete</button>` : ""}
       </div>
-      <p class="small muted" data-ext-hint ${extensionReady() ? "hidden" : ""}>The Chrome extension fills the sell forms for you on a computer. It isn't detected in this browser. See Settings to install it, or use the copy buttons.</p>
+      <p class="small muted" data-ext-hint ${extensionReady() ? "hidden" : ""}>The Chrome extension fills the sell forms for you on a computer. It isn't detected in this browser, so use the copy buttons, or see Settings to install it.</p>
     `;
     wire();
+    if (remoteChange) showRemote();
   };
 
   const fieldHtml = (path, label, value, kind, max = 0, placeholder = "") => {
@@ -196,6 +258,7 @@ export function renderItem($view, item, isNew) {
     const P = PLATFORMS[pid];
     const l = item.listings[pid] || { status: "none" };
     const m = item.market[pid] || {};
+    const stale = staleListings(item).includes(pid);
     return `
       <div class="row">
         <div class="grow"><label for="st">Status on ${P.name}</label>
@@ -206,6 +269,20 @@ export function renderItem($view, item, isNew) {
         <div class="grow"><label for="soldPrice">Sold for ($)</label><input id="soldPrice" type="number" min="0" step="0.01" placeholder="${esc(priceFor(item, pid))}" value="${esc(l.soldPrice)}"></div>
         <div class="grow"><label for="soldAt">Sale date</label><input id="soldAt" type="date" value="${toDateInput(l.soldAt)}"></div>` : ""}
       </div>
+      ${l.status === "listed" ? `
+      <div class="relist-box ${stale ? "is-stale" : ""}">
+        <p class="small"><b>${stale ? "Needs a refresh: " : ""}Listed ${daysListed(l)} day${daysListed(l) === 1 ? "" : "s"}</b>
+          · since ${fmtDate(l.relistedAt || l.listedAt)}${l.relistCount ? ` · relisted ${l.relistCount}×` : ""}</p>
+        <div class="row">
+          <div class="grow"><label for="views">Views</label><input id="views" type="number" min="0" inputmode="numeric" value="${esc(l.views ?? "")}"></div>
+          <div class="grow"><label for="likes">${pid === "ebay" ? "Watchers" : pid === "vinted" ? "Favourites" : "Likes"}</label><input id="likes" type="number" min="0" inputmode="numeric" value="${esc(l.likes ?? "")}"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="relisted" class="${stale ? "primary" : ""}">Mark relisted</button>
+          <button id="drop10">Drop price 10% (${money(priceFor(item, pid))} → ${money(droppedPrice(priceFor(item, pid)))})</button>
+        </div>
+        ${stale ? `<ul class="todo small">${RELIST_TIPS[pid].map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
+      </div>` : ""}
       <p class="small"><a href="${P.sellUrl}" target="_blank" rel="noopener">Open the ${P.name} sell page ↗</a></p>
       ${P.fields.map(([key, label, kind, max, fb]) => {
         const fallback = fb ? (item.overview[fb] ?? item.details[fb] ?? "") : "";
@@ -219,6 +296,7 @@ export function renderItem($view, item, isNew) {
     let o = item;
     for (const k of keys.slice(0, -1)) o = o[k] ??= {};
     o[keys.at(-1)] = value;
+    mark(path);
   };
   const getPath = (path) => path.split(".").reduce((o, k) => o?.[k], item);
 
@@ -231,14 +309,25 @@ export function renderItem($view, item, isNew) {
     });
   };
 
+  const refreshCover = async () => {
+    item.cover = item.photos[0]?.dataUrl ? await thumbOf(item.photos[0].dataUrl) : "";
+    mark("photos", "cover");
+  };
+
   const addFiles = async (files) => {
     const room = MAX_PHOTOS - item.photos.length;
     const imgs = [...files].filter((f) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name));
     if (imgs.length > room) toast(`Only ${MAX_PHOTOS} photos per item. Added the first ${Math.max(room, 0)}.`, 3500);
+    setSaveState("Uploading photos…");
     for (const f of imgs.slice(0, Math.max(room, 0))) {
-      try { item.photos.push(await fileToPhoto(f)); }
-      catch { toast(`Couldn't read ${f.name}. Try a JPEG or PNG.`, 3500); }
+      try {
+        const dataUrl = await fileToDataUrl(f);
+        item.photos.push(await store.addPhoto(item, dataUrl));
+      } catch (err) {
+        toast(/decode|source image/i.test(err.message) ? `Couldn't read ${f.name}. Try a JPEG or PNG.` : `Photo not saved: ${err.message}`, 4000);
+      }
     }
+    await refreshCover();
     await saveNow();
     draw();
   };
@@ -254,9 +343,16 @@ export function renderItem($view, item, isNew) {
 
     document.getElementById("labels").oninput = (e) => {
       item.labels = [...new Set(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))];
+      mark("labels");
       saveSoon();
     };
-    document.querySelectorAll("[data-mp]").forEach((c) => (c.onchange = () => { item.marketplaces[c.dataset.mp] = c.checked; saveSoon(); draw(); }));
+    document.querySelectorAll("[data-mp]").forEach((c) => (c.onchange = () => { item.marketplaces[c.dataset.mp] = c.checked; mark(`marketplaces.${c.dataset.mp}`); saveSoon(); draw(); }));
+    const owner = document.getElementById("owner");
+    if (owner) owner.onchange = async () => {
+      item.ownerUid = owner.value;
+      mark("ownerUid");
+      await saveNow({ act: "owner", info: members().find((m) => m.uid === owner.value)?.name || "member" });
+    };
 
     // Copy buttons copy what will actually be posted (own value, else the shared one).
     document.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => {
@@ -273,10 +369,17 @@ export function renderItem($view, item, isNew) {
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
     drop.ondragleave = () => drop.classList.remove("over");
     drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); };
-    document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { item.photos.splice(+b.dataset.rm, 1); saveSoon(); draw(); }));
-    document.querySelectorAll("[data-mv]").forEach((b) => (b.onclick = () => {
+    document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => {
+      const [gone] = item.photos.splice(+b.dataset.rm, 1);
+      await refreshCover();
+      draw();
+      await saveNow();
+      store.removePhoto(gone.id).catch(() => {});
+    }));
+    document.querySelectorAll("[data-mv]").forEach((b) => (b.onclick = async () => {
       const i = +b.dataset.mv, j = i + +b.dataset.dir;
       [item.photos[i], item.photos[j]] = [item.photos[j], item.photos[i]];
+      if (i === 0 || j === 0) await refreshCover(); else mark("photos");
       saveSoon();
       draw();
     }));
@@ -287,20 +390,55 @@ export function renderItem($view, item, isNew) {
     document.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { tab = b.dataset.tab; draw(); }));
     const st = document.getElementById("st");
     if (st) st.onchange = async () => {
+      setListingStatus(item, tab, st.value);
+      mark(`listings.${tab}`);
       if (st.value === "sold") {
-        setListingStatus(item, tab, "sold");
         const others = PIDS.filter((p) => p !== tab && statusOf(item, p) === "listed").map((p) => PLATFORMS[p].name);
         if (others.length) toast(`Sold! Now remove it from ${others.join(" and ")}.`, 5000);
-      } else {
-        setListingStatus(item, tab, st.value);
       }
-      await saveNow();
+      await saveNow({ act: st.value, pid: tab });
       draw();
     };
     const soldPrice = document.getElementById("soldPrice");
-    if (soldPrice) soldPrice.oninput = () => { item.listings[tab].soldPrice = soldPrice.value; saveSoon(); };
+    if (soldPrice) soldPrice.oninput = () => { item.listings[tab].soldPrice = soldPrice.value; mark(`listings.${tab}`); saveSoon(); };
     const soldAt = document.getElementById("soldAt");
-    if (soldAt) soldAt.onchange = () => { item.listings[tab].soldAt = fromDateInput(soldAt.value); saveSoon(); };
+    if (soldAt) soldAt.onchange = () => { item.listings[tab].soldAt = fromDateInput(soldAt.value); mark(`listings.${tab}`); saveSoon(); };
+
+    // Relist tools (shown while listed).
+    const views = document.getElementById("views"), likes = document.getElementById("likes");
+    const statsChanged = () => { setListingStats(item, tab, views.value, likes.value); mark(`listings.${tab}`); saveSoon(); };
+    if (views) { views.oninput = statsChanged; likes.oninput = statsChanged; }
+    const relisted = document.getElementById("relisted");
+    if (relisted) relisted.onclick = async () => {
+      markRelisted(item, tab);
+      mark(`listings.${tab}`);
+      await saveNow({ act: "relisted", pid: tab });
+      toast(`Relisted on ${PLATFORMS[tab].name}. The clock restarts today.`);
+      draw();
+    };
+    const drop10 = document.getElementById("drop10");
+    if (drop10) drop10.onclick = async () => {
+      const np = droppedPrice(priceFor(item, tab));
+      if (!np) return toast("Add a price first.");
+      item.market[tab] = { ...(item.market[tab] || {}), price: np };
+      mark(`market.${tab}.price`);
+      await saveNow({ act: "price", pid: tab, info: np });
+      toast(`New ${PLATFORMS[tab].name} price ${money(np)}. Change it on ${PLATFORMS[tab].name} too.`, 4000);
+      draw();
+    };
+
+    const reload = document.getElementById("reload");
+    if (reload) reload.onclick = async () => {
+      await saveNow();
+      if (remoteChange === "deleted") return (location.hash = "#/inventory");
+      const fresh = await store.getItem(item.id);
+      remoteChange = null;
+      Object.assign(item, fresh, { photos: fresh.photos });
+      knownUpdatedAt = item.updatedAt;
+      photosLoading = item.photos.some((p) => !p.dataUrl);
+      draw();
+      if (photosLoading) loadPhotosNow();
+    };
 
     document.getElementById("done").onclick = async () => { await saveNow(); location.hash = "#/inventory"; };
     document.getElementById("send").onclick = async (e) => {
@@ -316,19 +454,25 @@ export function renderItem($view, item, isNew) {
     const copyBtn = document.getElementById("copyItem");
     if (copyBtn) copyBtn.onclick = async () => {
       await saveNow();
-      const c = copyOfItem(item);
-      await putItem(c);
-      location.hash = `#/item/${encodeURIComponent(c.id)}`;
-      toast("Copied. You're editing the copy.");
+      copyBtn.disabled = true;
+      toast("Copying…");
+      try {
+        const c = copyOfItem(item);
+        c.ownerUid = c.createdBy = store.myUid();
+        c.history = [{ at: Date.now(), by: store.myUid(), act: "created" }];
+        await store.copyItemWithPhotos(item, c);
+        location.hash = `#/item/${encodeURIComponent(c.id)}`;
+        toast("Copied. You're editing the copy.");
+      } catch (err) { toast(err.message, 5000); copyBtn.disabled = false; }
     };
     const del = document.getElementById("del");
     if (del) del.onclick = async () => {
-      const res = await modal("Delete this item?", "<p>This removes the item and its photos from this browser. It doesn't touch your live listings.</p>", [{ value: "yes", label: "Delete", danger: true }]);
+      const res = await modal("Delete this item?", "<p>This removes the item and its photos for everyone in the household. It doesn't touch your live listings.</p>", [{ value: "yes", label: "Delete", danger: true }]);
       if (!res) return;
       clearTimeout(saveTimer);
-      saved = true;
-      await deleteItem(item.id);
-      location.hash = "#/inventory";
+      dirty.clear();
+      try { await store.deleteItem(item); location.hash = "#/inventory"; }
+      catch (err) { toast(err.message, 5000); }
     };
     onExtensionReady(() => document.querySelectorAll("[data-ext-hint]").forEach((el) => (el.hidden = true)));
   };
@@ -343,10 +487,11 @@ export function renderItem($view, item, isNew) {
     busy = true;
     draw();
     try {
-      const ai = await writeListings({ apiKey: settings.apiKey, photos: item.photos, price: item.overview.price, notes: item.aiNotes, style: settings.descStyle });
+      const ai = await writeListings({ apiKey: settings.apiKey, model: settings.model, photos: item.photos, price: item.overview.price, notes: item.aiNotes, style: settings.descStyle });
       applyAi(item, ai);
       if (!item.overview.price && ai.pricing?.suggested_price) item.overview.price = String(ai.pricing.suggested_price);
-      await saveNow();
+      mark(...AI_PATHS);
+      await saveNow({ act: "ai" });
       toast("Listing generated. Review it below.");
     } catch (err) {
       toast(err.message, 6000);
@@ -356,5 +501,13 @@ export function renderItem($view, item, isNew) {
     }
   };
 
+  const loadPhotosNow = async () => {
+    try { await store.loadPhotos(item); }
+    catch (err) { toast(`Photos didn't load: ${err.message}`, 5000); }
+    photosLoading = false;
+    draw();
+  };
+
   draw();
+  if (photosLoading) loadPhotosNow();
 }

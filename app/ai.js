@@ -109,7 +109,7 @@ export function makeClient(apiKey) {
 }
 
 // photos: [{ dataUrl }] (JPEG data URLs). Returns the parsed listing object.
-export async function writeListings({ apiKey, photos, price, notes, style = "friendly" }) {
+export async function writeListings({ apiKey, model = MODEL, photos, price, notes, style = "friendly" }) {
   if (!apiKey) throw new Error("Add your Claude API key in Settings first.");
   if (!photos.length) throw new Error("Add at least one photo.");
   const client = makeClient(apiKey);
@@ -123,7 +123,7 @@ export async function writeListings({ apiKey, photos, price, notes, style = "fri
   let response;
   try {
     response = await client.beta.messages.create({
-      model: MODEL,
+      model,
       max_tokens: 16000,
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",

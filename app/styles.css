@@ -294,3 +294,51 @@ details summary { cursor: pointer; color: var(--accent); margin-top: 8px; }
 }
 #toast.show { opacity: 1; }
 @media (max-width: 760px) { #toast { bottom: calc(76px + env(safe-area-inset-bottom)); } }
+
+/* ---------- signed out: no navigation until you're in a household ---------- */
+.shell.signed-out .sidebar { display: none; }
+.shell.signed-out main { margin-left: 0; max-width: none; padding-bottom: 40px; }
+.auth-wrap { max-width: 460px; margin: 24px auto; }
+.auth-wrap > h1 { margin-bottom: 6px; }
+.auth-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.auth-brand img { width: 40px; height: 40px; border-radius: 10px; }
+.or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; margin: 14px 0; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.label-like { display: block; font-weight: 600; font-size: 13px; margin: 10px 0 4px; }
+
+/* ---------- people ---------- */
+.who { display: inline-flex; align-items: center; gap: 6px; vertical-align: middle; }
+.avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--c); color: #fff; font-size: 10px; font-weight: 800; display: inline-grid; place-items: center; flex: none; letter-spacing: .02em; }
+.who-name { font-weight: 600; }
+.person-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.person-filter button { border-radius: 999px; padding: 5px 12px 5px 6px; gap: 6px; }
+.person-filter button:first-child { padding-left: 12px; }
+.person-filter button.on { border-color: var(--accent); background: var(--accent-soft); }
+.activity { list-style: none; margin: 0; padding: 0; }
+.activity li { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; }
+.activity li + li { border-top: 1px solid var(--line); }
+.activity .who { padding-top: 1px; }
+.att-row .who { margin-left: auto; }
+.members { list-style: none; margin: 0; padding: 0; }
+.members li { display: flex; align-items: center; gap: 8px; padding: 6px 0; flex-wrap: wrap; }
+.members li button { margin-left: auto; }
+.invite code { display: inline-block; font-size: 22px; font-weight: 800; letter-spacing: .12em; padding: 6px 12px; border-radius: 8px; }
+
+/* ---------- relisting ---------- */
+.relist-box { background: var(--bg); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.relist-box.is-stale { background: var(--warn-soft); }
+.relist-box .row { align-items: end; }
+.tipbox { background: var(--warn-soft); border-radius: 10px; padding: 8px 12px; margin: 8px 0; font-size: 14px; }
+.mcell.stale { border: 2px solid var(--warn); }
+.mcell.stale .pill { background: var(--warn); color: #fff; }
+.pill-mini.stale { background: var(--warn-soft); color: var(--warn); }
+.relist-row { align-items: center; margin-bottom: 6px; }
+.relist-row .chip-toggle { min-width: 130px; }
+
+/* ---------- storage meter ---------- */
+.meter { height: 10px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+@media (max-width: 760px) {
+  .mcell.stale { background: var(--warn-soft); }
+  .mcell.stale .pill { background: none; color: var(--warn); font-weight: 700; }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "resell-lister-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:rules": "firebase emulators:exec --only firestore --project demo-resell \"node rules.test.mjs\"",
+    "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-resell \"node e2e.test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase": "12.19.0",
+    "firebase-tools": "15.32.1",
+    "playwright": "1.63.0"
+  }
+}

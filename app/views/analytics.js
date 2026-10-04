@@ -1,7 +1,8 @@
 // Analytics: totals for a time range, monthly revenue vs profit, per-marketplace breakdown, sales list.
-import { allItems } from "../db.js";
-import { PLATFORMS, PIDS, salesOf, itemStatus, titleOf, money } from "../model.js";
+import { allItems } from "../store.js";
+import { PLATFORMS, PIDS, salesOf, itemStatus, titleOf, money, matchesPerson } from "../model.js";
 import { esc, fmtDate } from "../ui.js";
+import { members, badge, personFilter, wirePersonFilter, selectedPerson } from "./people.js";
 
 const RANGES = {
   "30": ["Last 30 days", 30],
@@ -15,19 +16,25 @@ const monthKey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${
 const monthLabel = (key) => { const [y, m] = key.split("-").map(Number); return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" }); };
 
 export async function renderAnalytics($view) {
-  const items = await allItems();
+  const everything = await allItems();
   const draw = () => {
+    const person = selectedPerson();
+    const items = everything.filter((it) => matchesPerson(it, person));
+    const many = members().length > 1;
     const since = RANGES[range][1] === Infinity ? 0 : Date.now() - RANGES[range][1] * 864e5;
     const sales = salesOf(items).filter((s) => s.soldAt >= since);
     const listings = items.flatMap((it) => PIDS.map((p) => it.listings[p]).filter((l) => l?.listedAt && l.listedAt >= since));
     const active = items.filter((it) => itemStatus(it) === "listed").length;
     const revenue = sum(sales, "price"), fees = sum(sales, "fees"), cost = sum(sales, "cost"), profit = sum(sales, "profit");
     const sellThrough = sales.length + active ? Math.round((sales.length / (sales.length + active)) * 100) : 0;
+    const avgDays = (rows) => { const d = rows.filter((r) => r.daysToSell != null); return d.length ? Math.round(d.reduce((a, r) => a + r.daysToSell, 0) / d.length) : null; };
+    const avgDaysAll = avgDays(sales);
 
     $view.innerHTML = `
       <div class="page-head"><h1>Analytics</h1>
         <select id="range" class="auto" aria-label="Time range">${Object.entries(RANGES).map(([k, [lbl]]) => `<option value="${k}" ${k === range ? "selected" : ""}>${lbl}</option>`).join("")}</select>
       </div>
+      ${personFilter()}
 
       <section class="card">
         <div class="hero"><span class="stat-label">Profit</span><b class="hero-num">${money(profit)}</b>
@@ -39,6 +46,7 @@ export async function renderAnalytics($view) {
           <div class="stat"><span class="stat-label">Sell-through rate</span><b>${sellThrough}%</b><span class="small muted">sold ÷ (sold + active)</span></div>
           <div class="stat"><span class="stat-label">Fees (est.)</span><b>${money(fees)}</b></div>
           <div class="stat"><span class="stat-label">Avg. sale</span><b>${money(sales.length ? revenue / sales.length : "")}</b></div>
+          <div class="stat"><span class="stat-label">Avg. days to sell</span><b>${avgDaysAll ?? "—"}</b></div>
         </div>
       </section>
 
@@ -46,6 +54,19 @@ export async function renderAnalytics($view) {
         <h2>Revenue vs profit by month</h2>
         ${sales.length ? chart(sales) : `<p class="muted">No sales in this period yet. Mark an item as sold in Inventory to see it here.</p>`}
       </section>
+
+      ${many && person === "all" ? `
+      <section class="card">
+        <h2>By person</h2>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Person</th><th class="num">Sold</th><th class="num">Revenue</th><th class="num">Profit</th><th class="num">Active</th><th class="num">Avg. days to sell</th></tr></thead>
+          <tbody>${members().map((m) => {
+            const s = sales.filter((x) => x.ownerUid === m.uid);
+            const act = items.filter((it) => it.ownerUid === m.uid && itemStatus(it) === "listed").length;
+            return `<tr><td>${badge(m.uid, { withName: true })}</td><td class="num">${s.length}</td><td class="num">${money(sum(s, "price"))}</td><td class="num">${money(sum(s, "profit"))}</td><td class="num">${act}</td><td class="num">${avgDays(s) ?? "—"}</td></tr>`;
+          }).join("")}</tbody>
+        </table></div>
+      </section>` : ""}
 
       <section class="card">
         <h2>By marketplace</h2>
@@ -62,13 +83,14 @@ export async function renderAnalytics($view) {
       <section class="card">
         <div class="section-head"><h2>Sales</h2>${sales.length ? `<button id="csv">Download CSV</button>` : ""}</div>
         ${sales.length ? `<div class="table-wrap"><table class="data">
-          <thead><tr><th>Date</th><th>Item</th><th>Marketplace</th><th class="num">Price</th><th class="num">Fees</th><th class="num">Cost</th><th class="num">Profit</th></tr></thead>
-          <tbody>${sales.map((s) => `<tr><td>${fmtDate(s.soldAt)}</td><td><a href="#/item/${encodeURIComponent(s.item.id)}">${esc(titleOf(s.item))}</a></td><td>${PLATFORMS[s.pid].name}</td><td class="num">${money(s.price)}</td><td class="num">${money(s.fees)}</td><td class="num">${money(s.cost)}</td><td class="num">${money(s.profit)}</td></tr>`).join("")}</tbody>
+          <thead><tr><th>Date</th><th>Item</th>${many ? "<th>Who</th>" : ""}<th>Marketplace</th><th class="num">Price</th><th class="num">Fees</th><th class="num">Cost</th><th class="num">Profit</th></tr></thead>
+          <tbody>${sales.map((s) => `<tr><td>${fmtDate(s.soldAt)}</td><td><a href="#/item/${encodeURIComponent(s.item.id)}">${esc(titleOf(s.item))}</a></td>${many ? `<td>${badge(s.ownerUid, { withName: true })}</td>` : ""}<td>${PLATFORMS[s.pid].name}</td><td class="num">${money(s.price)}</td><td class="num">${money(s.fees)}</td><td class="num">${money(s.cost)}</td><td class="num">${money(s.profit)}</td></tr>`).join("")}</tbody>
         </table></div>` : `<p class="muted">No sales in this period.</p>`}
         <p class="small muted">Fees are estimates from Settings, not the marketplaces' actual charges. Shipping you paid isn't included.</p>
       </section>
     `;
     document.getElementById("range").onchange = (e) => { range = e.target.value; draw(); };
+    wirePersonFilter(draw);
     const csv = document.getElementById("csv");
     if (csv) csv.onclick = () => downloadCsv(sales);
     wireTooltip();
@@ -173,10 +195,11 @@ function downloadCsv(sales) {
   const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   // Text that starts like a formula would run in Excel or Sheets.
   const text = (v) => (/^[=+\-@\t\r]/.test(String(v ?? "")) ? `'${v}` : v);
-  const lines = [["Date", "Item", "SKU", "Marketplace", "Price", "Fees (est.)", "Cost", "Profit"].map(cell).join(",")];
+  const who = (uid) => members().find((m) => m.uid === uid)?.name || "Former member";
+  const lines = [["Date", "Item", "SKU", "Who", "Marketplace", "Price", "Fees (est.)", "Cost", "Profit", "Days to sell"].map(cell).join(",")];
   for (const s of sales) {
-    lines.push([new Date(s.soldAt).toISOString().slice(0, 10), text(titleOf(s.item)), text(s.item.overview.sku), PLATFORMS[s.pid].name,
-      s.price.toFixed(2), s.fees.toFixed(2), s.cost.toFixed(2), s.profit.toFixed(2)].map(cell).join(","));
+    lines.push([new Date(s.soldAt).toISOString().slice(0, 10), text(titleOf(s.item)), text(s.item.overview.sku), text(who(s.ownerUid)), PLATFORMS[s.pid].name,
+      s.price.toFixed(2), s.fees.toFixed(2), s.cost.toFixed(2), s.profit.toFixed(2), s.daysToSell ?? ""].map(cell).join(","));
   }
   const a = Object.assign(document.createElement("a"), {
     href: URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" })),

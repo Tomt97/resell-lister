@@ -1,0 +1,87 @@
+rules_version = '2';
+// Resell Lister: copy all of this into Firebase → Firestore Database → Rules, then Publish.
+// Only members of a household can see or change its items and photos. Joining needs a valid invite code.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function household(hid) { return get(/databases/$(database)/documents/households/$(hid)).data; }
+    function isMember(hid) { return signedIn() && request.auth.uid in household(hid).members; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    // Each person's own profile: which household they're in.
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Invite codes: anyone signed in who knows a code can look it up; nobody can list them.
+    match /invites/{code} {
+      allow get: if signedIn();
+      allow list, update: if false;
+      allow create: if signedIn() && code.size() >= 8
+        && request.resource.data.createdBy == request.auth.uid
+        && isMember(request.resource.data.householdId);
+      allow delete: if signedIn() && isMember(resource.data.householdId);
+    }
+
+    match /households/{hid} {
+      allow get: if signedIn() && request.auth.uid in resource.data.members;
+      allow list: if false;
+
+      // Start a household with yourself as the only member.
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.members == [request.auth.uid]
+        && request.resource.data.keys().hasOnly(["name", "ownerUid", "members", "memberNames", "settings", "createdAt"]);
+
+      allow update: if signedIn() && (
+        // Members: rename the household, change names, shared settings and the invite code.
+        (request.auth.uid in resource.data.members
+          && !changed().hasAny(["ownerUid", "members", "createdAt"])
+          && changed().hasOnly(["name", "memberNames", "settings", "inviteCode"]))
+        // The creator can remove another member (and their name).
+        || (resource.data.ownerUid == request.auth.uid
+          && changed().hasOnly(["members", "memberNames"])
+          && request.resource.data.members.hasAll([request.auth.uid])
+          && resource.data.members.hasAll(request.resource.data.members))
+        // Anyone else in the household can leave (remove only themselves).
+        || (request.auth.uid in resource.data.members
+          && resource.data.ownerUid != request.auth.uid
+          && changed().hasOnly(["members", "memberNames"])
+          && !(request.auth.uid in request.resource.data.members)
+          && request.resource.data.members.size() == resource.data.members.size() - 1
+          && resource.data.members.hasAll(request.resource.data.members))
+        // Joining: add only yourself, using the household's current invite code. At most 6 members.
+        || (!(request.auth.uid in resource.data.members)
+          && changed().hasOnly(["members", "memberNames", "joinCode"])
+          && request.resource.data.members == resource.data.members.concat([request.auth.uid])
+          && request.resource.data.members.size() <= 6
+          && request.resource.data.memberNames.diff(resource.data.get("memberNames", {})).affectedKeys().hasOnly([request.auth.uid])
+          && request.resource.data.joinCode == resource.data.get("inviteCode", "")
+          && get(/databases/$(database)/documents/invites/$(request.resource.data.joinCode)).data.householdId == hid)
+      );
+      allow delete: if false;
+
+      // Items: every member can read and edit every item in the household.
+      match /items/{itemId} {
+        allow read, delete: if isMember(hid);
+        allow create, update: if isMember(hid)
+          && request.resource.data.ownerUid is string
+          && request.resource.data.updatedBy == request.auth.uid;
+      }
+
+      // Photos: stored as bytes, under 1 MB each (the free plan's document limit).
+      match /photos/{photoId} {
+        allow read, delete: if isMember(hid);
+        allow create: if isMember(hid)
+          && request.resource.data.data is bytes
+          && request.resource.data.data.size() < 1000000
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
