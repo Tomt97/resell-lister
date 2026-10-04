@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Resell Lister</title>
+  <style>
+    body { width: 320px; margin: 0; font: 13px/1.4 system-ui, sans-serif; color: #1d2320; background: #fff; }
+    header { background: #1f6f5c; color: #fff; padding: 10px 12px; font-weight: 700; }
+    main { padding: 10px 12px; }
+    .it { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; }
+    .it img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; background: #eee; }
+    .it .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button, a.b { font: inherit; font-weight: 600; border: 1px solid #ddd; background: #fff; border-radius: 8px; padding: 4px 8px; cursor: pointer; color: #1d2320; text-decoration: none; }
+    .links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .muted { color: #66706b; }
+  </style>
+</head>
+<body>
+  <header>Resell Lister</header>
+  <main>
+    <div id="list"></div>
+    <div class="links">
+      <a class="b" target="_blank" href="https://www.ebay.com/sl/prelist/suggest">Sell on eBay</a>
+      <a class="b" target="_blank" href="https://poshmark.com/create-listing">Sell on Poshmark</a>
+      <a class="b" target="_blank" href="https://www.vinted.com/items/new">Sell on Vinted</a>
+    </div>
+    <p class="muted">On a sell page, click the green <b>Resell Lister</b> button in the bottom-right corner.</p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
