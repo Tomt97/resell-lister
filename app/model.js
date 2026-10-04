@@ -118,8 +118,9 @@ export const settings = {
   },
   get descStyle() { return safeGet("rl.descStyle") || "friendly"; },
   set descStyle(v) { safeSet("rl.descStyle", v); },
-  get person() { return safeGet("rl.person") || "all"; },
-  set person(v) { safeSet("rl.person", v); },
+  // Whose inventory you're looking at, remembered per account on this device.
+  personFor(uid) { return safeGet(`rl.person.${uid}`) || ""; },
+  setPersonFor(uid, v) { safeSet(`rl.person.${uid}`, v); },
 };
 
 export const uid = () =>

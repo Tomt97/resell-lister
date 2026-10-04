@@ -19,13 +19,16 @@ and which listings have gone stale and need a relist.
 
 ## How it works
 
-- **Accounts and household**: each person signs in (email and password, or Google). One person
-  creates the household and shares an invite link; the other joins with it. Everyone in the
-  household sees every item, and each item shows who it belongs to (a colored initial).
-  **Everyone / Me / partner** buttons filter Home, Inventory and Analytics.
+- **Accounts and separate inventories**: each person signs in (email and password, or Google). One
+  person creates the household and shares an invite link; the other joins with it. Each of you
+  opens the app to **your own inventory**: your items, your Home and your Analytics. New items always
+  go into your own inventory. The **Inventory: Mine / Jane's / Both** switch lets you look at your
+  partner's inventory (a banner reminds you whose you're viewing, with **Back to mine**), or both
+  together with a colored initial on each item and a **By person** table in Analytics. You can hand
+  an item over with **Belongs to** on the item.
 - **Home**: today's summary, **Needs attention** (sold on one site but still listed elsewhere,
-  stale listings, unfinished drafts) and **Recent activity** (who added, listed, sold, relisted
-  or repriced what).
+  stale listings, unfinished drafts) and **Recent activity** on those items (who added, listed,
+  sold, relisted or repriced what), all for the inventory you're viewing.
 - **Inventory**: one row per item, one column per marketplace, with the days each listing has been up.
   Tap a cell to mark it listed, sold (asks the sale price and date), delisted or relisted, drop the
   price 10%, or record views and likes. Search, status filters (including **Needs relist**),

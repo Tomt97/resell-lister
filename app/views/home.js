@@ -35,10 +35,10 @@ export async function renderHome($view) {
     // Delist reminders first (they risk a double sale), then stale listings, then drafts.
     .sort((a, b) => rank(a.reasons[0]) - rank(b.reasons[0]));
 
-  // Activity across the household (or the selected person), newest first.
+  // Activity on the items in the inventory you're looking at, newest first.
   const activity = everything
     .flatMap((it) => (it.history || []).map((h) => ({ ...h, it })))
-    .filter((h) => person === "all" || h.by === person)
+    .filter((h) => matchesPerson(h.it, person))
     .sort((a, b) => b.at - a.at)
     .slice(0, 15);
 
@@ -84,7 +84,7 @@ export async function renderHome($view) {
             ${it.cover ? `<img src="${esc(it.cover)}" alt="">` : `<span class="ph"></span>`}
             <span class="att-text"><b>${esc(titleOf(it))}</b>
               <span class="${rank(reasons[0]) < 2 ? "warn-text" : "muted"} small">${esc(reasons.join(" · "))}</span></span>
-            ${members().length > 1 ? badge(it.ownerUid) : ""}
+            ${person === "all" ? badge(it.ownerUid) : ""}
           </a>
         </li>`).join("")}</ul>`
       : `<p class="muted">You're all caught up.</p>`}

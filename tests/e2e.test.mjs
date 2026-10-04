@@ -166,11 +166,22 @@ check("2 photo docs in cloud, item keeps only ids/sizes + cover", globalThis.PHO
 check("history has created + ai", (stored.history || []).map((h) => h.act).join(",") === "created,ai");
 check("shipping saved to cloud", stored.shipping?.weightLb === "2" && stored.shipping?.weightOz === "4" && stored.shipping?.ebayFlatCost === "7.50" && stored.shipping?.vintedSize === "Large" && stored.shipping?.aiGuess === false, JSON.stringify(stored.shipping));
 
-// ---------- Jane sees it live, with Tom's badge, and lists it ----------
+// ---------- Jane opens to her own (empty) inventory, peeks at Tom's, and helps list his item ----------
 await J.page.goto(APP + "#/inventory");
+await J.page.waitForSelector(".person-filter");
+check("Jane's inventory opens to her own (empty)", (await J.page.textContent("main")).includes("Your inventory is empty"));
+const switchText = (await J.page.textContent(".person-filter")).replace(/\s+/g, " ");
+check("switch offers Mine / Tom's / Both", switchText.includes("Mine") && switchText.includes("Tom's") && switchText.includes("Both"), switchText);
+await J.page.locator(".person-filter button", { hasText: "Tom's" }).click();
 await J.page.waitForFunction(() => document.querySelectorAll(".grid-row:not(.grid-head)").length === 1, null, { timeout: 10000 });
-check("Jane sees Tom's item", (await J.page.textContent(".grid")).includes("Levi's 501"));
-check("item shows Tom's badge", (await J.page.locator(".grid-row:not(.grid-head) .avatar").first().textContent()) === "T");
+check("Jane can peek at Tom's inventory", (await J.page.textContent(".grid")).includes("Levi's 501"));
+check("banner: looking at Tom's inventory", (await J.page.textContent(".viewing-other")).includes("Tom's"));
+await J.page.screenshot({ path: `${SHOTS}/s-peek-phone.png` });
+check("no owner badges inside one person's inventory", (await J.page.locator(".grid-row:not(.grid-head) .c-item .avatar").count()) === 0);
+await J.page.locator(".person-filter button[data-person=all]").click();
+check("Both view shows Tom's badge on his item", (await J.page.locator(".grid-row:not(.grid-head) .c-item .avatar").first().textContent()) === "T");
+await J.page.locator(".person-filter button", { hasText: "Tom's" }).click();
+await J.page.waitForSelector(".viewing-other");
 await rows(J.page).first().locator("[data-mkt=poshmark]").click();
 await J.page.locator("dialog.modal button[value=listed]").click();
 await toastHas(J.page, "Poshmark: Listed");
@@ -245,25 +256,31 @@ check("picking packaging fills size and Vinted size", (await J.page.inputValue("
 await J.page.waitForFunction(() => document.getElementById("saveState").textContent.includes("All changes saved"), null, { timeout: 10000 });
 check("no sideways scrolling on phone (item page)", !(await J.page.evaluate(() => document.documentElement.scrollWidth > innerWidth)));
 await J.page.locator("#shipCard").screenshot({ path: `${SHOTS}/s-shipping-card-phone.png` });
+// Jane is still peeking at Tom's inventory: her new item went to her own, not his.
+await J.page.goto(APP + "#/inventory");
+await J.page.waitForSelector(".viewing-other");
+check("Jane's new item isn't in Tom's inventory", !(await J.page.textContent("main")).includes("Lululemon"));
+await J.page.click(".viewing-other button");
+await J.page.waitForFunction(() => document.querySelectorAll(".grid-row:not(.grid-head)").length === 1 && !document.querySelector(".viewing-other"), null, { timeout: 10000 });
+check("'Back to mine' shows only Jane's item", (await J.page.textContent(".grid")).includes("Lululemon") && !(await J.page.textContent(".grid")).includes("Levi's"));
 await J.page.goto(APP + "#/");
 await J.page.waitForSelector(".attention");
 check("draft without weight: 'Add the package weight'", (await J.page.textContent(".attention")).includes("Add the package weight"));
+check("Jane's home only lists her own items", !(await J.page.textContent(".attention")).includes("Levi's"));
 await J.page.goto(APP + "#/inventory");
 await J.page.waitForSelector(".grid-row:not(.grid-head)");
-await J.page.waitForFunction(() => document.querySelectorAll(".grid-row:not(.grid-head)").length === 2, null, { timeout: 10000 });
-await J.page.click("[data-person]:not([data-person=all]) >> text=Me");
-check("Jane 'Me' filter shows only her item", (await rows(J.page).count()) === 1 && (await J.page.textContent(".grid")).includes("Lululemon"));
 const janeRow = rows(J.page).first();
 await janeRow.locator("[data-mkt=vinted]").click();
 await J.page.locator("dialog.modal button[value=sold]").click();
 await J.page.fill("dialog.modal #m-price", "45");
 await J.page.locator("dialog.modal button[value=ok]").click();
 await toastHas(J.page, "Sold");
-await J.page.click("[data-person=all]");
+await J.page.locator(".person-filter button[data-person=all]").click();
 
 // Tom sells his on eBay at 30
 await T.page.goto(APP + "#/inventory");
-await T.page.waitForFunction(() => document.querySelectorAll(".grid-row:not(.grid-head)").length === 2, null, { timeout: 10000 });
+await T.page.waitForSelector(".grid-row:has-text(\"Levi's 501\")");
+check("Tom's own inventory doesn't show Jane's item", !(await T.page.textContent(".grid")).includes("Lululemon"));
 const tomRow = T.page.locator(".grid-row", { hasText: "Levi's 501" });
 await tomRow.locator("[data-mkt=ebay]").click();
 await T.page.locator("dialog.modal button[value=sold]").click();
@@ -276,12 +293,15 @@ await T.page.goto(APP + "#/analytics");
 await T.page.selectOption("#range", "all");
 await T.page.waitForSelector(".hero-num");
 // Tom: 30 - (30*13.6% + 0.40) - 5 = 20.52 ; Jane: Vinted 0% fee: 45 - 8 = 37 ; total 57.52
+check("Tom's analytics default to his own: $20.52", (await T.page.textContent(".hero-num")).trim() === "$20.52", await T.page.textContent(".hero-num"));
+check("no By person table in a single inventory", (await T.page.locator("section", { hasText: "By person" }).count()) === 0);
+await T.page.locator(".person-filter button[data-person=all]").click();
 check("total profit $57.52", (await T.page.textContent(".hero-num")).trim() === "$57.52", await T.page.textContent(".hero-num"));
 const byPerson = await T.page.locator("section", { hasText: "By person" }).textContent();
 check("By person table: Tom $20.52, Jane $37.00", byPerson.includes("$20.52") && byPerson.includes("$37.00"), byPerson.replace(/\s+/g, " ").slice(0, 200));
-await T.page.click("[data-person]:not([data-person=all]) >> text=Jane");
-check("Jane filter: profit $37.00", (await T.page.textContent(".hero-num")).trim() === "$37.00");
-await T.page.click("[data-person=all]");
+await T.page.locator(".person-filter button", { hasText: "Jane's" }).click();
+check("Jane's inventory: profit $37.00", (await T.page.textContent(".hero-num")).trim() === "$37.00");
+await T.page.locator(".person-filter button[data-person=all]").click();
 await T.page.screenshot({ path: `${SHOTS}/s-analytics.png`, fullPage: true });
 
 // Home attention for Tom shows delist reminder with Tom's badge

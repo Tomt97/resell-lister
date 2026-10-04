@@ -354,3 +354,5 @@ details summary { cursor: pointer; color: var(--accent); margin-top: 8px; }
 .pkg-row label input, .pkg-row label select { margin-top: 4px; font-weight: 400; }
 .row.tight { flex-wrap: nowrap; }
 .row.tight .grow { flex: 1 1 0; min-width: 0; }
+.pf-label { align-self: center; font-size: 13px; font-weight: 700; color: var(--muted); margin-right: 2px; }
+.viewing-other { background: var(--accent-soft); border-radius: 10px; padding: 8px 12px; margin: -4px 0 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

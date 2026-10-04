@@ -38,6 +38,8 @@ const state = { q: "", filter: "all", label: "", sort: "created", page: 0, selec
 export async function renderInventory($view) {
   let items = await allItems();
   const many = members().length > 1;
+  // Show whose item it is only when both inventories are on screen.
+  const showWho = () => many && selectedPerson() === "all";
 
   const labels = [...new Set(items.flatMap((it) => it.labels || []))].sort();
   if (state.label && !labels.includes(state.label.slice(1))) state.label = "";
@@ -100,7 +102,10 @@ export async function renderInventory($view) {
 
       ${items.length === 0 ? `
         <div class="card empty"><h2>No items yet</h2><p class="muted">Add photos and a price. The AI writes your eBay, Poshmark and Vinted listings.</p><a class="btn primary" href="#/new">+ Add item</a></div>`
-      : rows.length === 0 ? `<div class="card empty"><p class="muted">No items match. Try another filter, person or search.</p></div>` : `
+      : mine.length === 0 ? (person === myUid()
+        ? `<div class="card empty"><h2>Your inventory is empty</h2><p class="muted">Add your first item.</p><a class="btn primary" href="#/new">+ Add item</a></div>`
+        : `<div class="card empty"><h2>Nothing here yet</h2><p class="muted">They haven't added any items.</p></div>`)
+      : rows.length === 0 ? `<div class="card empty"><p class="muted">No items match. Try another filter or search.</p></div>` : `
       <div class="grid" role="table" aria-label="Inventory">
         <div class="grid-row grid-head" role="row">
           <span role="columnheader" class="c-check"><input type="checkbox" id="selAll" ${allOnPage ? "checked" : ""} aria-label="Select all on this page"></span>
@@ -108,7 +113,7 @@ export async function renderInventory($view) {
           ${PIDS.map((p) => `<span role="columnheader" class="c-mkt">${PLATFORMS[p].name} <span class="n" title="Items in this view ever listed on ${PLATFORMS[p].name}">${rows.filter((it) => statusOf(it, p) !== "none").length}</span></span>`).join("")}
           <span role="columnheader" class="c-menu"><span class="sr-only">Actions</span></span>
         </div>
-        ${pageRows.map((it) => rowHtml(it, many)).join("")}
+        ${pageRows.map((it) => rowHtml(it, showWho())).join("")}
       </div>
       <div class="pager">
         <span class="muted small">${rows.length} item${rows.length === 1 ? "" : "s"} · page ${state.page + 1} of ${pages}</span>
