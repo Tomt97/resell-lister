@@ -66,9 +66,9 @@ export async function renderSettings($view) {
       </select>
 
       <div id="geminiBox" ${settings.aiProvider === "gemini" ? "" : "hidden"}>
-        <p class="small">Free key, no card needed: go to <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, sign in with Google, tap <b>Create API key</b>, and paste it here. Google's free tier has daily limits, and Google may use what you send (photos and text) to improve its products.</p>
+        <p class="small">Free key, no card needed: go to <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, sign in with Google, tap <b>Create API key</b>, then <b>Copy key</b> and paste it here (it starts with AQ.). Google's free tier has daily limits, and Google may use what you send (photos and text) to improve its products.</p>
         <label for="geminiKey">Gemini API key</label>
-        <input id="geminiKey" type="password" autocomplete="off" placeholder="AIza…" value="${esc(settings.geminiKey)}">
+        <input id="geminiKey" type="password" autocomplete="off" placeholder="AQ.… (paste the whole key)" value="${esc(settings.geminiKey)}">
         <label for="geminiModel">Gemini model</label>
         <select id="geminiModel">${settings.geminiModels.length
           ? settings.geminiModels.map((m, i) => `<option value="${esc(m.id)}" ${m.id === settings.geminiModel ? "selected" : ""}>${esc(m.label)}${i === 0 ? " (recommended)" : ""}</option>`).join("")
