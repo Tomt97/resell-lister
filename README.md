@@ -1,9 +1,9 @@
 # Resell Lister
 
 Take photos, type a price. AI writes your eBay, Poshmark and Vinted listings (title, description,
-category, condition, brand, size, colors, item specifics). Everyone in your household signs in with
-their own account and shares one inventory, so you can see who listed what, how sales are going,
-and which listings have gone stale and need a relist.
+category, condition, brand, size, colors, item specifics). You and your partner each sign in with
+your own account and keep your own inventory, and either of you can look at the other's (or both
+together) to see how sales are going and which listings have gone stale and need a relist.
 
 - **app/**: the web app. Works on phone and computer, and installs like an app.
 - **extension/**: an optional Chrome extension (computer only) that fills the eBay, Poshmark and Vinted sell forms.
