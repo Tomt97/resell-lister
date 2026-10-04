@@ -7,6 +7,8 @@ import { onBeforeLeave } from "../pending.js";
 import {
   PLATFORMS, PIDS, CONDITIONS, LISTING_STATUS, MAX_PHOTOS, RELIST_TIPS, settings, titleOf, priceFor, valueFor, statusOf,
   setListingStatus, markRelisted, droppedPrice, setListingStats, staleListings, daysListed, netAfterFees, money, copyOfItem,
+  EBAY_PACKAGE_TYPES, EBAY_SERVICES, EBAY_COST_TYPES, HANDLING_TIMES, VINTED_SIZES, totalOz, fmtWeight, fmtDims,
+  suggestVintedSize, suggestEbayType,
 } from "../model.js";
 import { writeListings, applyAi, DESCRIPTION_STYLES } from "../ai.js";
 import { esc, toast, copyText, modal, toDateInput, fromDateInput, fmtDate } from "../ui.js";
@@ -15,7 +17,7 @@ import { members, nameOf } from "./people.js";
 
 const STYLE_LABELS = { friendly: "Friendly", short: "Short & simple", detailed: "Detailed" };
 // Every field the AI rewrites, so a regenerate saves all of them.
-const AI_PATHS = ["overview.title", "overview.description", "overview.condition", "overview.price", "details", "market", "ai"];
+const AI_PATHS = ["overview.title", "overview.description", "overview.condition", "overview.price", "details", "market", "ai", "shipping"];
 
 // Shrink photos: small enough for the free storage (about 150 KB each), sharp enough for listings and the AI.
 async function fileToDataUrl(file, maxSide = 1280, quality = 0.8) {
@@ -216,6 +218,8 @@ export function renderItem($view, item, isNew) {
         </div>
       </section>
 
+      ${shippingCard(chosen)}
+
       <section class="card">
         <h2>Private</h2>
         <p class="muted small">Never posted to a marketplace. Everyone in your household can see it.</p>
@@ -242,6 +246,80 @@ export function renderItem($view, item, isNew) {
     `;
     wire();
     if (remoteChange) showRemote();
+  };
+
+  // ---------- shipping & package ----------
+  const opt = (value, label, current) => `<option value="${esc(value)}" ${String(value) === String(current ?? "") ? "selected" : ""}>${esc(label)}</option>`;
+  const num = (path, label, value, attrs = "") => `<div class="grow"><label for="f-${path.replace(/\./g, "-")}">${label}</label><input id="f-${path.replace(/\./g, "-")}" data-path="${path}" type="number" inputmode="decimal" min="0" ${attrs} value="${esc(value ?? "")}"></div>`;
+  const shippingCard = (chosen) => {
+    const sh = item.shipping || {};
+    const presets = settings.packaging;
+    return `
+      <section class="card" id="shipCard">
+        <h2>Shipping & package</h2>
+        <p class="muted small">Weigh it packed. eBay needs the weight and box size; Vinted needs a parcel size.${sh.aiGuess ? ` <b class="warn-text" id="aiShipWarn">The weight and package below are AI guesses from the photos. Weigh it to be sure.</b>` : ""}</p>
+        <label for="pkg">Packaging</label>
+        <select id="pkg">
+          <option value="">Choose packaging…</option>
+          ${presets.map((p) => opt(p.id, `${p.name} (${p.length}×${p.width}×${p.height} in)`, sh.presetId)).join("")}
+          ${opt("custom", "Custom size", sh.presetId)}
+        </select>
+        <p class="small muted">Edit the packaging list in Settings.</p>
+        <div class="row tight">
+          ${num("shipping.weightLb", "Packed weight (lb)", sh.weightLb, 'step="1"')}
+          ${num("shipping.weightOz", "+ ounces (oz)", sh.weightOz, 'step="0.1" max="15.9"')}
+        </div>
+        <div class="row tight">
+          ${num("shipping.length", "Length (in)", sh.length, 'step="0.5"')}
+          ${num("shipping.width", "Width (in)", sh.width, 'step="0.5"')}
+          ${num("shipping.height", "Height (in)", sh.height, 'step="0.5"')}
+        </div>
+        <p class="small" id="shipSummary"></p>
+
+        ${chosen.includes("ebay") ? `
+        <h3 class="ship-h">eBay</h3>
+        <div class="row">
+          <div class="grow"><label for="f-shipping-ebayPackageType">Package type</label>
+            <select id="f-shipping-ebayPackageType" data-path="shipping.ebayPackageType"><option value="">Choose…</option>${EBAY_PACKAGE_TYPES.map((t) => opt(t, t, sh.ebayPackageType)).join("")}</select>
+            <span class="small muted" id="ebayHint"></span></div>
+          <div class="grow"><label for="f-shipping-ebayService">Shipping service</label>
+            <select id="f-shipping-ebayService" data-path="shipping.ebayService"><option value="">Choose…</option>${EBAY_SERVICES.map((t) => opt(t, t, sh.ebayService)).join("")}</select></div>
+        </div>
+        <div class="row">
+          <div class="grow"><label for="f-shipping-ebayCostType">Who pays shipping</label>
+            <select id="f-shipping-ebayCostType" data-path="shipping.ebayCostType"><option value="">Choose…</option>${Object.entries(EBAY_COST_TYPES).map(([k, v]) => opt(k, v, sh.ebayCostType)).join("")}</select></div>
+          <div class="grow" id="flatRow" ${sh.ebayCostType === "flat" ? "" : "hidden"}>${num("shipping.ebayFlatCost", "Flat shipping charge ($)", sh.ebayFlatCost, 'step="0.01"').replace(/^<div class="grow">|<\/div>$/g, "")}</div>
+          <div class="grow"><label for="f-shipping-handlingDays">Handling time</label>
+            <select id="f-shipping-handlingDays" data-path="shipping.handlingDays"><option value="">Choose…</option>${Object.entries(HANDLING_TIMES).map(([k, v]) => opt(k, v, sh.handlingDays)).join("")}</select></div>
+        </div>` : ""}
+
+        ${chosen.includes("vinted") ? `
+        <h3 class="ship-h">Vinted</h3>
+        <div class="row">
+          <div class="grow"><label for="f-shipping-vintedSize">Parcel size</label>
+            <select id="f-shipping-vintedSize" data-path="shipping.vintedSize"><option value="">Choose…</option>${Object.entries(VINTED_SIZES).map(([k, v]) => opt(k, v, sh.vintedSize)).join("")}</select>
+            <span class="small muted" id="vintedHint"></span></div>
+        </div>
+        <p class="small muted">Size limits are from Vinted's published guide; check Vinted's own size guide if it doesn't match.</p>` : ""}
+
+        ${chosen.includes("poshmark") ? `<p class="small muted"><b>Poshmark</b> sends the buyer a prepaid label, so there's nothing to choose for most items. For heavy items, pick the weight Poshmark asks for using the weight above.</p>` : ""}
+      </section>`;
+  };
+
+  // Live hints: suggested Vinted size and eBay package type, and a one-line summary with copy.
+  const updateShipHints = () => {
+    const sh = item.shipping || {};
+    const oz = totalOz(sh);
+    const sum = document.getElementById("shipSummary");
+    if (sum) sum.innerHTML = oz || fmtDims(sh)
+      ? `<b>${esc([fmtWeight(sh), fmtDims(sh)].filter(Boolean).join(" · "))}</b> <button class="tiny" type="button" id="copyShip">Copy</button>`
+      : `<span class="muted">Add the weight and size.</span>`;
+    const copyShip = document.getElementById("copyShip");
+    if (copyShip) copyShip.onclick = () => copyText([fmtWeight(sh), fmtDims(sh)].filter(Boolean).join(", "));
+    const vs = suggestVintedSize(oz), vh = document.getElementById("vintedHint");
+    if (vh) vh.textContent = vs && vs !== sh.vintedSize ? `Suggested from the weight: ${vs}` : "";
+    const et = suggestEbayType(sh), eh = document.getElementById("ebayHint");
+    if (eh) eh.textContent = et && et !== sh.ebayPackageType ? `Suggested from the size: ${et}` : "";
   };
 
   const fieldHtml = (path, label, value, kind, max = 0, placeholder = "") => {
@@ -336,10 +414,33 @@ export function renderItem($view, item, isNew) {
   const wire = () => {
     // Every field with data-path writes straight into the item and autosaves.
     document.querySelectorAll("[data-path]").forEach((el) => {
-      const handler = () => { setPath(el.dataset.path, el.value); updateCounts(); saveSoon(); };
+      const handler = () => {
+        setPath(el.dataset.path, el.value);
+        if (el.dataset.path.startsWith("shipping.")) {
+          if (item.shipping.aiGuess && /weight|length|width|height/.test(el.dataset.path)) {
+            item.shipping.aiGuess = false;
+            mark("shipping.aiGuess");
+            document.getElementById("aiShipWarn")?.remove();
+          }
+          if (el.dataset.path === "shipping.ebayCostType") document.getElementById("flatRow").hidden = el.value !== "flat";
+          updateShipHints();
+        }
+        updateCounts();
+        saveSoon();
+      };
       el.addEventListener(el.tagName === "SELECT" ? "change" : "input", handler);
     });
     updateCounts();
+
+    updateShipHints();
+    document.getElementById("pkg").onchange = (e) => {
+      const p = settings.packaging.find((x) => x.id === e.target.value);
+      item.shipping = { ...(item.shipping || {}), presetId: e.target.value };
+      if (p) Object.assign(item.shipping, { length: p.length, width: p.width, height: p.height, ...(p.ebayType ? { ebayPackageType: p.ebayType } : {}), ...(p.vintedSize ? { vintedSize: p.vintedSize } : {}) });
+      mark("shipping");
+      saveSoon();
+      draw();
+    };
 
     document.getElementById("labels").oninput = (e) => {
       item.labels = [...new Set(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))];
@@ -487,8 +588,9 @@ export function renderItem($view, item, isNew) {
     busy = true;
     draw();
     try {
-      const ai = await writeListings({ apiKey: settings.apiKey, model: settings.model, photos: item.photos, price: item.overview.price, notes: item.aiNotes, style: settings.descStyle });
-      applyAi(item, ai);
+      const packaging = settings.packaging;
+      const ai = await writeListings({ apiKey: settings.apiKey, model: settings.model, photos: item.photos, price: item.overview.price, notes: item.aiNotes, style: settings.descStyle, packaging: packaging.map((p) => p.name) });
+      applyAi(item, ai, packaging);
       if (!item.overview.price && ai.pricing?.suggested_price) item.overview.price = String(ai.pricing.suggested_price);
       mark(...AI_PATHS);
       await saveNow({ act: "ai" });

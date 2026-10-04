@@ -342,3 +342,15 @@ details summary { cursor: pointer; color: var(--accent); margin-top: 8px; }
   .mcell.stale { background: var(--warn-soft); }
   .mcell.stale .pill { background: none; color: var(--warn); font-weight: 700; }
 }
+
+/* ---------- shipping & packaging ---------- */
+.ship-h { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.pkg-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.pkg-row label { margin-top: 0; }
+.pkg-name { flex: 2 1 180px; }
+.pkg-dim { flex: 0 0 72px; }
+.pkg-row .grow { flex: 1 1 150px; }
+.pkg-rm { margin-bottom: 8px; }
+.pkg-row label input, .pkg-row label select { margin-top: 4px; font-weight: 400; }
+.row.tight { flex-wrap: nowrap; }
+.row.tight .grow { flex: 1 1 0; min-width: 0; }

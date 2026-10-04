@@ -58,6 +58,12 @@ export const LISTING_SCHEMA = obj({
     confidence: { type: "string", enum: ["low", "medium", "high"] },
     reasoning: str,
   }),
+  shipping: obj({
+    estimated_packed_weight_oz: { type: "number" },
+    packaging_name: str,
+    ebay_package_type: { type: "string", enum: ["Letter", "Large Envelope", "Package (or thick envelope)", "Large Package"] },
+    vinted_parcel_size: { type: "string", enum: ["Small", "Medium", "Large"] },
+  }),
   check_before_posting: strList,
 });
 
@@ -101,6 +107,10 @@ Rules:
 - pricing: give your estimate for a used-market US price from what you see; you have no live sold
   data, so set confidence honestly and say in reasoning what drives the number. The seller's own
   price is what will be used; you are only advising.
+- shipping: estimate the packed weight in ounces (item plus packaging), choose the best packaging_name
+  from the seller's packaging list exactly as written (or "" if none fits), the eBay package type, and
+  the Vinted parcel size (Small up to 1 lb, Medium 1 to 2 lb, Large 2 to 5 lb). It's a guess the
+  seller will check on a scale.
 - check_before_posting: short, practical to-dos (missing photos of tag or flaws, measurements to add,
   authenticity checks for designer items).`;
 
@@ -109,7 +119,7 @@ export function makeClient(apiKey) {
 }
 
 // photos: [{ dataUrl }] (JPEG data URLs). Returns the parsed listing object.
-export async function writeListings({ apiKey, model = MODEL, photos, price, notes, style = "friendly" }) {
+export async function writeListings({ apiKey, model = MODEL, photos, price, notes, style = "friendly", packaging = [] }) {
   if (!apiKey) throw new Error("Add your Claude API key in Settings first.");
   if (!photos.length) throw new Error("Add at least one photo.");
   const client = makeClient(apiKey);
@@ -139,7 +149,8 @@ export async function writeListings({ apiKey, model = MODEL, photos, price, note
               text:
                 `Asking price: $${Number(price || 0).toFixed(2)}\n` +
                 `Seller notes: ${notes?.trim() || "(none)"}\n` +
-                `Description style: ${DESCRIPTION_STYLES[style] || DESCRIPTION_STYLES.friendly}\n\nWrite the listings.`,
+                `Description style: ${DESCRIPTION_STYLES[style] || DESCRIPTION_STYLES.friendly}\n` +
+                `Seller's packaging: ${packaging.length ? packaging.join("; ") : "(none listed)"}\n\nWrite the listings.`,
             },
           ],
         },
@@ -172,7 +183,7 @@ function explainApiError(err) {
 
 // Copy an AI answer into an item. Overwrites the listing text; keeps price, cost, SKU,
 // private notes, labels and listing statuses.
-export function applyAi(item, ai) {
+export function applyAi(item, ai, packagingList = []) {
   const join = (a) => (Array.isArray(a) ? a.filter(Boolean).join(", ") : a || "");
   const o = ai.overview;
   item.overview = { ...item.overview, title: o.title, description: o.description, condition: o.condition };
@@ -207,5 +218,28 @@ export function applyAi(item, ai) {
     },
   };
   item.ai = { pricing: ai.pricing, check_before_posting: ai.check_before_posting || [], flaws: o.flaws || [] };
+  applyShippingGuess(item, ai.shipping, packagingList);
   return item;
+}
+
+// Fill shipping from the AI's guess, but never over anything you've already entered.
+function applyShippingGuess(item, guess, packagingList) {
+  if (!guess) return;
+  const sh = { ...(item.shipping || {}) };
+  const hasWeight = Number(sh.weightLb) || Number(sh.weightOz);
+  let changed = false;
+  if (!hasWeight && guess.estimated_packed_weight_oz > 0) {
+    const oz = Math.round(guess.estimated_packed_weight_oz);
+    sh.weightLb = String(Math.floor(oz / 16));
+    sh.weightOz = String(oz % 16);
+    changed = true;
+  }
+  const preset = packagingList.find((p) => p.name === guess.packaging_name);
+  if (!sh.presetId && !sh.length && preset) {
+    Object.assign(sh, { presetId: preset.id, length: preset.length, width: preset.width, height: preset.height });
+    changed = true;
+  }
+  if (!sh.ebayPackageType && guess.ebay_package_type) { sh.ebayPackageType = guess.ebay_package_type; changed = true; }
+  if (!sh.vintedSize && guess.vinted_parcel_size) { sh.vintedSize = guess.vinted_parcel_size; changed = true; }
+  if (changed) { sh.aiGuess = true; item.shipping = sh; }
 }

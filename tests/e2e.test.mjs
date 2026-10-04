@@ -17,6 +17,7 @@ const fakeAi = {
   vinted: { title: "Levi's 501 jeans", category_path: "Men > Jeans", condition: "Good", colors: ["Blue"] },
   pricing: { suggested_price: 30, quick_sale_price: 22, confidence: "medium", reasoning: "Popular style." },
   check_before_posting: ["Measure the inseam"],
+  shipping: { estimated_packed_weight_oz: 24, packaging_name: "Poly mailer 14.5×19", ebay_package_type: "Package (or thick envelope)", vinted_parcel_size: "Medium" },
 };
 
 const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
@@ -26,6 +27,15 @@ async function newUser(label, viewport = { width: 1280, height: 900 }) {
   await ctx.route("**/app/config.js", (r) => r.fulfill({ contentType: "text/javascript", body: `export const firebaseConfig = { apiKey: "demo-key", authDomain: "demo-resell.firebaseapp.com", projectId: "demo-resell", storageBucket: "", messagingSenderId: "1", appId: "1:1:web:1" };` }));
   await ctx.route("https://api.anthropic.com/**", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
     body: JSON.stringify({ id: "m", type: "message", role: "assistant", model: "x", stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: "text", text: JSON.stringify(fakeAi) }] }) }));
+  // Stand-in for the Chrome extension's bridge: answers the app and keeps what it was sent.
+  await ctx.addInitScript(() => {
+    window.__pushed = [];
+    window.addEventListener("message", (e) => {
+      if (e.source !== window || e.data?.source !== "resell-lister-app") return;
+      if (e.data.type === "ping") window.postMessage({ source: "resell-lister-ext", type: "pong" }, location.origin);
+      if (e.data.type === "push") { window.__pushed.push(e.data.item); window.postMessage({ source: "resell-lister-ext", type: "pushed", id: e.data.item.id, ok: true }, location.origin); }
+    });
+  });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${label}: ${e.message}`));
   // The "wrong" user signs in with a bad password on purpose; the browser logs that 400 itself.
@@ -55,6 +65,20 @@ await T.page.click("#newInvite");
 await T.page.waitForSelector("#inviteCode");
 const code = (await T.page.textContent("#inviteCode")).trim();
 check("invite code made (10 chars)", /^[A-Z2-9]{10}$/.test(code), code);
+await T.page.click("#addPkg");
+const newRow = T.page.locator(".pkg-row").last();
+await newRow.locator("[data-k=name]").fill("Bubble mailer 9×12");
+await newRow.locator("[data-k=length]").fill("12");
+await newRow.locator("[data-k=width]").fill("9");
+await newRow.locator("[data-k=height]").fill("1");
+await newRow.locator("[data-k=vintedSize]").selectOption("Small");
+await T.page.click("#savePkg");
+await toastHas(T.page, "Packaging saved");
+await T.page.click("#addPkg");
+await T.page.click("#savePkg");
+await toastHas(T.page, "needs a name");
+check("empty packaging row is refused", true);
+await T.page.locator(".pkg-row").last().locator("[data-pkg-rm]").click();
 await T.page.screenshot({ path: `${SHOTS}/s-settings-tom.png`, fullPage: true });
 
 // Wrong-password sign-in message (separate context)
@@ -100,6 +124,33 @@ await T.page.click("#gen");
 await T.page.waitForSelector(".ai-result", { timeout: 15000 });
 await T.page.waitForFunction(() => document.getElementById("saveState").textContent.includes("All changes saved"), null, { timeout: 10000 });
 check("AI filled title", (await T.page.inputValue("#f-overview-title")) === fakeAi.overview.title);
+check("AI shipping guess: 1 lb 8 oz", (await T.page.inputValue("#f-shipping-weightLb")) === "1" && (await T.page.inputValue("#f-shipping-weightOz")) === "8");
+check("AI picked packaging -> dims 19 × 14.5 × 2", (await T.page.inputValue("#f-shipping-length")) === "19" && (await T.page.inputValue("#f-shipping-width")) === "14.5");
+check("AI guess warning shown", (await T.page.textContent("#shipCard")).includes("AI guesses"));
+check("Vinted size Medium, eBay type Package", (await T.page.inputValue("#f-shipping-vintedSize")) === "Medium" && (await T.page.inputValue("#f-shipping-ebayPackageType")) === "Package (or thick envelope)");
+// Weigh it: 2 lb 4 oz -> AI warning goes, Vinted suggests Large
+await T.page.fill("#f-shipping-weightLb", "2");
+await T.page.fill("#f-shipping-weightOz", "4");
+check("weighing clears the AI-guess warning", !(await T.page.textContent("#shipCard")).includes("AI guesses"));
+check("Vinted hint suggests Large for 2 lb 4 oz", (await T.page.textContent("#vintedHint")).includes("Large"));
+check("summary shows 2 lb 4 oz · 19 × 14.5 × 2 in", (await T.page.textContent("#shipSummary")).includes("2 lb 4 oz · 19 × 14.5 × 2 in"));
+await T.page.selectOption("#f-shipping-vintedSize", "Large");
+check("hint disappears once you pick the suggested size", (await T.page.textContent("#vintedHint")) === "");
+check("flat-rate charge hidden until chosen", await T.page.isHidden("#flatRow"));
+await T.page.selectOption("#f-shipping-ebayCostType", "flat");
+check("flat-rate charge appears", await T.page.isVisible("#flatRow"));
+await T.page.fill("#f-shipping-ebayFlatCost", "7.50");
+await T.page.selectOption("#f-shipping-ebayService", "USPS Ground Advantage");
+await T.page.selectOption("#f-shipping-handlingDays", "1");
+await T.page.waitForFunction(() => document.getElementById("saveState").textContent.includes("All changes saved"), null, { timeout: 10000 });
+await T.page.locator("#shipCard").screenshot({ path: `${SHOTS}/s-shipping-card.png` });
+await T.page.click("#send");
+await toastHas(T.page, "Sent.");
+const pushed = (await T.page.evaluate(() => window.__pushed)).at(-1);
+check("extension gets eBay shipping lines", pushed.listing.ebay.package_weight === "2 lb 4 oz" && pushed.listing.ebay.package_dims === "19 × 14.5 × 2 in"
+  && pushed.listing.ebay.package_type === "Package (or thick envelope)" && pushed.listing.ebay.shipping_cost === "Flat rate $7.50"
+  && pushed.listing.ebay.shipping_service === "USPS Ground Advantage" && pushed.listing.ebay.handling_time === "1 business day", JSON.stringify(pushed.listing.ebay).slice(0, 300));
+check("extension gets Vinted parcel size + 2 photos", pushed.listing.vinted.parcel_size === "Large (2 to 5 lb)" && pushed.photos.length === 2);
 
 let stored;
 await env.withSecurityRulesDisabled(async (c) => {
@@ -113,6 +164,7 @@ await env.withSecurityRulesDisabled(async (c) => {
 check("item saved to cloud with owner Tom + price + AI title", stored?.overview?.price === "25" && stored?.overview?.title === fakeAi.overview.title && stored?.ownerUid && stored?.updatedBy === stored?.ownerUid);
 check("2 photo docs in cloud, item keeps only ids/sizes + cover", globalThis.PHOTO_COUNT === 2 && stored.photos.length === 2 && !stored.photos[0].dataUrl && stored.photos[0].size > 1000 && stored.cover?.startsWith("data:image/jpeg"));
 check("history has created + ai", (stored.history || []).map((h) => h.act).join(",") === "created,ai");
+check("shipping saved to cloud", stored.shipping?.weightLb === "2" && stored.shipping?.weightOz === "4" && stored.shipping?.ebayFlatCost === "7.50" && stored.shipping?.vintedSize === "Large" && stored.shipping?.aiGuess === false, JSON.stringify(stored.shipping));
 
 // ---------- Jane sees it live, with Tom's badge, and lists it ----------
 await J.page.goto(APP + "#/inventory");
@@ -187,7 +239,16 @@ await J.page.fill("#f-overview-title", "Lululemon Align Leggings 6");
 await J.page.fill("#f-overview-price", "48");
 await J.page.fill("#f-overview-cost", "8");
 await J.page.waitForFunction(() => location.hash.startsWith("#/item/"), null, { timeout: 10000 });
-await J.page.click("#done");
+check("Jane's item lists the household's custom packaging", (await J.page.textContent("#pkg")).includes("Bubble mailer 9×12"));
+await J.page.selectOption("#pkg", { label: "Bubble mailer 9×12 (12×9×1 in)" });
+check("picking packaging fills size and Vinted size", (await J.page.inputValue("#f-shipping-length")) === "12" && (await J.page.inputValue("#f-shipping-vintedSize")) === "Small");
+await J.page.waitForFunction(() => document.getElementById("saveState").textContent.includes("All changes saved"), null, { timeout: 10000 });
+check("no sideways scrolling on phone (item page)", !(await J.page.evaluate(() => document.documentElement.scrollWidth > innerWidth)));
+await J.page.locator("#shipCard").screenshot({ path: `${SHOTS}/s-shipping-card-phone.png` });
+await J.page.goto(APP + "#/");
+await J.page.waitForSelector(".attention");
+check("draft without weight: 'Add the package weight'", (await J.page.textContent(".attention")).includes("Add the package weight"));
+await J.page.goto(APP + "#/inventory");
 await J.page.waitForSelector(".grid-row:not(.grid-head)");
 await J.page.waitForFunction(() => document.querySelectorAll(".grid-row:not(.grid-head)").length === 2, null, { timeout: 10000 });
 await J.page.click("[data-person]:not([data-person=all]) >> text=Me");

@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="resell-lister-app" content="1">
+<title>Bridge test</title>
+<p id="out">waiting</p>
+<script>
+  // Sends one item to the extension the same way the app does.
+  const item = window.TEST_ITEM;
+  addEventListener("message", (e) => {
+    if (e.data?.source !== "resell-lister-ext") return;
+    if (e.data.type === "pong" && !window.sent) {
+      window.sent = true;
+      postMessage({ source: "resell-lister-app", type: "push", item: window.TEST_ITEM }, location.origin);
+    }
+    if (e.data.type === "pushed") document.getElementById("out").textContent = e.data.ok ? "pushed" : "error";
+  });
+  postMessage({ source: "resell-lister-app", type: "ping" }, location.origin);
+</script>

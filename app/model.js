@@ -67,6 +67,29 @@ export const DEFAULT_RELIST = {
   vinted: { on: true, days: 21 },
 };
 
+// ---------- shipping & packaging ----------
+// eBay US package types (eBay help: "Package weight and size").
+export const EBAY_PACKAGE_TYPES = ["Letter", "Large Envelope", "Package (or thick envelope)", "Large Package"];
+export const EBAY_SERVICES = [
+  "USPS Ground Advantage", "USPS Priority Mail", "USPS Priority Mail Flat Rate Envelope", "USPS Priority Mail Flat Rate Box",
+  "USPS Media Mail", "UPS Ground", "FedEx Ground / Home Delivery", "eBay Standard Envelope", "Other",
+];
+export const EBAY_COST_TYPES = { calculated: "Buyer pays (calculated by weight)", free: "Free shipping (I pay)", flat: "Flat rate" };
+export const HANDLING_TIMES = { "0": "Same business day", "1": "1 business day", "2": "2 business days", "3": "3 business days" };
+// Vinted US sizes, as commonly published: check Vinted's own size guide if a limit changes.
+export const VINTED_SIZES = { Small: "Small (up to 1 lb)", Medium: "Medium (1 to 2 lb)", Large: "Large (2 to 5 lb)" };
+
+// Starter packaging, editable for the household in Settings. Dimensions in inches.
+export const DEFAULT_PACKAGING = [
+  { id: "poly-small", name: "Poly mailer 10×13", length: 13, width: 10, height: 1, ebayType: "Package (or thick envelope)", vintedSize: "Small" },
+  { id: "poly-large", name: "Poly mailer 14.5×19", length: 19, width: 14.5, height: 2, ebayType: "Package (or thick envelope)", vintedSize: "Medium" },
+  { id: "padded", name: "Padded envelope 6×10", length: 10, width: 6, height: 1, ebayType: "Package (or thick envelope)", vintedSize: "Small" },
+  { id: "box-small", name: "Small box 8×6×4", length: 8, width: 6, height: 4, ebayType: "Package (or thick envelope)", vintedSize: "Small" },
+  { id: "box-medium", name: "Medium box 12×10×6", length: 12, width: 10, height: 6, ebayType: "Package (or thick envelope)", vintedSize: "Medium" },
+  { id: "box-large", name: "Large box 18×14×8", length: 18, width: 14, height: 8, ebayType: "Package (or thick envelope)", vintedSize: "Large" },
+  { id: "shoebox", name: "Shoe box 14×10×5", length: 14, width: 10, height: 5, ebayType: "Package (or thick envelope)", vintedSize: "Large" },
+];
+
 export const AI_MODELS = {
   "claude-opus-5-5": "Claude Opus 5.5 (best results, about 5 to 15 cents an item)",
   "claude-sonnet-5-5": "Claude Sonnet 5.5 (about half the cost)",
@@ -85,6 +108,9 @@ export const settings = {
   get fees() {
     const saved = shared.fees || {};
     return Object.fromEntries(PIDS.map((p) => [p, { ...DEFAULT_FEES[p], ...(saved[p] || {}) }]));
+  },
+  get packaging() {
+    return Array.isArray(shared.packaging) && shared.packaging.length ? shared.packaging : DEFAULT_PACKAGING;
   },
   get relist() {
     const saved = shared.relist || {};
@@ -121,6 +147,7 @@ export function blankItem() {
     ownerUid: "",
     createdBy: "",
     history: [],
+    shipping: {},
   };
 }
 
@@ -134,6 +161,7 @@ export function migrate(item) {
     item.photos ??= [];
     item.market ??= Object.fromEntries(PIDS.map((p) => [p, {}]));
     item.listings ??= blankListings();
+    item.shipping ??= {};
     return item;
   }
   const next = blankItem();
@@ -174,7 +202,7 @@ export function valueFor(item, pid, key) {
 }
 
 export function mergedListing(item, pid) {
-  return Object.fromEntries(PLATFORMS[pid].fields.map(([k]) => [k, valueFor(item, pid, k)]));
+  return { ...Object.fromEntries(PLATFORMS[pid].fields.map(([k]) => [k, valueFor(item, pid, k)])), ...shippingLines(item, pid) };
 }
 
 export const statusOf = (item, pid) => item.listings?.[pid]?.status || "none";
@@ -242,6 +270,7 @@ export function attentionReasons(item) {
     if (!item.photos.length) reasons.push("Add photos");
     else if (!item.overview.title) reasons.push("Generate or write the listing");
     if (!item.overview.price) reasons.push("Add a price");
+    if ((item.marketplaces?.ebay || item.marketplaces?.vinted) && !totalOz(item.shipping)) reasons.push("Add the package weight");
   }
   return reasons;
 }
@@ -338,3 +367,36 @@ export function setListingStats(item, pid, views, likes) {
 export const PERSON_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#4a3aa7"];
 export const initials = (name) => (String(name || "?").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2) || "?").toUpperCase();
 export const matchesPerson = (item, person) => person === "all" || item.ownerUid === person;
+
+// ---------- shipping helpers ----------
+export const totalOz = (sh = {}) => (Number(sh.weightLb) || 0) * 16 + (Number(sh.weightOz) || 0);
+export function fmtWeight(sh = {}) {
+  const oz = totalOz(sh);
+  if (!oz) return "";
+  const lb = Math.floor(oz / 16), rest = Math.round((oz - lb * 16) * 10) / 10;
+  return [lb ? `${lb} lb` : "", rest ? `${rest} oz` : ""].filter(Boolean).join(" ");
+}
+export const fmtDims = (sh = {}) => (sh.length && sh.width && sh.height ? `${sh.length} × ${sh.width} × ${sh.height} in` : "");
+
+// Vinted size from weight (Small ≤ 1 lb, Medium ≤ 2 lb, else Large).
+export const suggestVintedSize = (oz) => (!oz ? "" : oz <= 16 ? "Small" : oz <= 32 ? "Medium" : "Large");
+// eBay "Large Package" once length + girth passes 84 inches.
+export function suggestEbayType(sh = {}) {
+  const [a, b, c] = [sh.length, sh.width, sh.height].map(Number).sort((x, y) => y - x);
+  if (!a) return "";
+  return a + 2 * (b + c) > 84 ? "Large Package" : "Package (or thick envelope)";
+}
+
+// What to enter on each marketplace's shipping section (also sent to the extension).
+export function shippingLines(item, pid) {
+  const sh = item.shipping || {};
+  if (pid === "ebay") {
+    const cost = sh.ebayCostType === "flat" ? `Flat rate $${Number(sh.ebayFlatCost || 0).toFixed(2)}` : EBAY_COST_TYPES[sh.ebayCostType] || "";
+    return {
+      package_weight: fmtWeight(sh), package_dims: fmtDims(sh), package_type: sh.ebayPackageType || "",
+      shipping_service: sh.ebayService || "", shipping_cost: cost, handling_time: HANDLING_TIMES[sh.handlingDays] || "",
+    };
+  }
+  if (pid === "vinted") return { parcel_size: VINTED_SIZES[sh.vintedSize] || "", package_weight: fmtWeight(sh) };
+  return { package_weight: fmtWeight(sh) };
+}

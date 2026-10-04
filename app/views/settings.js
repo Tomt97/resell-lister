@@ -1,6 +1,6 @@
 import * as store from "../store.js";
 import { localItems, deleteLocalItem } from "../local.js";
-import { settings, PLATFORMS, PIDS, DEFAULT_FEES, DEFAULT_RELIST, AI_MODELS, blankItem } from "../model.js";
+import { settings, PLATFORMS, PIDS, DEFAULT_FEES, DEFAULT_RELIST, AI_MODELS, blankItem, uid, EBAY_PACKAGE_TYPES, VINTED_SIZES } from "../model.js";
 import { esc, toast, modal } from "../ui.js";
 import { extensionReady, onExtensionReady } from "../extbridge.js";
 import { members, badge } from "./people.js";
@@ -63,6 +63,17 @@ export async function renderSettings($view) {
       <label for="model">AI model</label>
       <select id="model">${Object.entries(AI_MODELS).map(([k, lbl]) => `<option value="${k}" ${k === settings.model ? "selected" : ""}>${esc(lbl)}</option>`).join("")}</select>
       <div class="row" style="margin-top:10px"><button class="primary" id="saveKey">Save</button><button id="clearKey">Remove key</button></div>
+    </section>
+
+    <section class="card">
+      <h2>Packaging (shared)</h2>
+      <p class="small muted">The boxes and mailers you use. Picking one on an item fills in its size, eBay package type and Vinted parcel size.</p>
+      <div id="pkgList">${settings.packaging.map(pkgRow).join("")}</div>
+      <div class="row" style="margin-top:10px">
+        <button id="addPkg">+ Add packaging</button>
+        <button class="primary" id="savePkg">Save packaging</button>
+        <button id="resetPkg">Reset to defaults</button>
+      </div>
     </section>
 
     <section class="card">
@@ -161,6 +172,26 @@ export async function renderSettings($view) {
   $("clearKey").onclick = () => { settings.apiKey = ""; $("key").value = ""; toast("Key removed"); };
 
   const shared = () => ({ ...(hh.settings || {}) });
+  $("addPkg").onclick = () => {
+    $("pkgList").insertAdjacentHTML("beforeend", pkgRow({ id: uid(), name: "", length: "", width: "", height: "", ebayType: "Package (or thick envelope)", vintedSize: "" }));
+    wirePkgRemove();
+    $("pkgList").lastElementChild.querySelector("input").focus();
+  };
+  const wirePkgRemove = () => document.querySelectorAll("[data-pkg-rm]").forEach((b) => (b.onclick = () => b.closest(".pkg-row").remove()));
+  wirePkgRemove();
+  $("savePkg").onclick = run(async () => {
+    const rows = [...document.querySelectorAll(".pkg-row")].map((r) => {
+      const v = (k) => r.querySelector(`[data-k=${k}]`).value.trim();
+      return { id: r.dataset.id, name: v("name"), length: +v("length") || 0, width: +v("width") || 0, height: +v("height") || 0, ebayType: v("ebayType"), vintedSize: v("vintedSize") };
+    });
+    const bad = rows.find((r) => !r.name || !r.length || !r.width || !r.height);
+    if (bad) return toast("Each packaging needs a name and all three sizes.", 4000);
+    if (!rows.length) return toast("Keep at least one packaging, or use Reset to defaults.", 4000);
+    await store.saveSharedSettings({ ...shared(), packaging: rows });
+    toast("Packaging saved for the household");
+  });
+  $("resetPkg").onclick = run(async () => { const s = shared(); delete s.packaging; await store.saveSharedSettings(s); renderSettings($view); toast("Packaging reset"); });
+
   $("saveRelist").onclick = run(async () => {
     const next = settings.relist;
     document.querySelectorAll("[data-relist-on]").forEach((c) => (next[c.dataset.relistOn].on = c.checked));
@@ -213,4 +244,17 @@ async function shrink(dataUrl, maxSide, quality) {
   c.height = Math.round(img.naturalHeight * scale);
   c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
   return c.toDataURL("image/jpeg", quality);
+}
+
+function pkgRow(p) {
+  const o = (v, l, cur) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`;
+  return `<div class="pkg-row" data-id="${esc(p.id)}">
+    <div class="grow pkg-name"><label>Name<input data-k="name" value="${esc(p.name)}" placeholder="e.g. Poly mailer 10×13"></label></div>
+    <div class="pkg-dim"><label>L (in)<input data-k="length" type="number" min="0" step="0.5" inputmode="decimal" value="${esc(p.length)}"></label></div>
+    <div class="pkg-dim"><label>W (in)<input data-k="width" type="number" min="0" step="0.5" inputmode="decimal" value="${esc(p.width)}"></label></div>
+    <div class="pkg-dim"><label>H (in)<input data-k="height" type="number" min="0" step="0.5" inputmode="decimal" value="${esc(p.height)}"></label></div>
+    <div class="grow"><label>eBay package type<select data-k="ebayType">${o("", "—", p.ebayType)}${EBAY_PACKAGE_TYPES.map((t) => o(t, t, p.ebayType)).join("")}</select></label></div>
+    <div class="grow"><label>Vinted parcel size<select data-k="vintedSize">${o("", "—", p.vintedSize)}${Object.entries(VINTED_SIZES).map(([k, v]) => o(k, v, p.vintedSize)).join("")}</select></label></div>
+    <button class="tiny danger pkg-rm" data-pkg-rm type="button" aria-label="Remove ${esc(p.name || "packaging")}">Remove</button>
+  </div>`;
 }

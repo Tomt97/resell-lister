@@ -41,6 +41,12 @@ and which listings have gone stale and need a relist.
   then each marketplace's own title, category, condition, specifics and price. If your partner
   changes the item while you have it open, you'll see "Jane just changed this item" with a button
   to load their version. Saves only send the fields you changed, so you don't overwrite each other.
+- **Shipping & package**: on each item, pick your packaging (its size fills in), enter the packed
+  weight, then the eBay package type (Letter, Large Envelope, Package, Large Package), shipping
+  service, who pays (calculated, free or flat rate) and handling time, and the Vinted parcel size
+  (Small up to 1 lb, Medium 1 to 2 lb, Large 2 to 5 lb). The app suggests the eBay type from the box
+  size and the Vinted size from the weight, and the AI guesses the weight from the photos (marked as a
+  guess until you weigh it). Your household's boxes and mailers are listed under **Settings → Packaging**.
 - **Analytics**: profit, revenue, units sold, sell-through, fees, average sale and average days to
   sell; revenue vs profit by month; tables **by person** and by marketplace; a sales list you can
   download as CSV.

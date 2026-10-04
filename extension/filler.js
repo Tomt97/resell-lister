@@ -168,6 +168,8 @@
     title: "Title", category_path: "Category", department: "Department", category: "Category", subcategory: "Subcategory",
     condition: "Condition", brand: "Brand", size: "Size", colors: "Colors", material: "Material", style_tags: "Style tags",
     item_specifics: "Item specifics", description: "Description",
+    package_weight: "Package weight", package_dims: "Package size (L × W × H)", package_type: "eBay package type",
+    shipping_service: "Shipping service", shipping_cost: "Who pays shipping", handling_time: "Handling time", parcel_size: "Vinted parcel size",
   };
 
   function render(open, message = "") {
@@ -196,8 +198,8 @@
             <button class="photos">Add photos only</button>
           </div>
           <div class="f"><div class="k">Price <button data-copy="$price">Copy</button></div><div class="v">$${esc(valueFor("$price"))}</div></div>
-          ${Object.keys(FIELD_LABELS).filter((k) => k in L).map((k) => `<div class="f"><div class="k">${esc(FIELD_LABELS[k] || k)} <button data-copy="${esc(k)}">Copy</button></div><div class="v">${esc(L[k])}</div></div>`).join("")}
-          <p class="muted">Category, condition, size and color menus differ on every site. Pick them using the values above. Then review the form and press the site's own List button.</p>
+          ${Object.keys(FIELD_LABELS).filter((k) => L[k]).map((k) => `<div class="f"><div class="k">${esc(FIELD_LABELS[k] || k)} <button data-copy="${esc(k)}">Copy</button></div><div class="v">${esc(L[k])}</div></div>`).join("")}
+          <p class="muted">Category, condition, size, color and shipping menus differ on every site. Pick them using the values above. Then review the form and press the site's own List button.</p>
         `}`}
       </div>`;
     root.querySelector(".close").onclick = () => render(false);
