@@ -105,6 +105,17 @@ export const settings = {
   set apiKey(v) { safeSet("rl.apiKey", v); },
   get model() { const m = safeGet("rl.model"); return AI_MODELS[m] ? m : "claude-opus-5-5"; },
   set model(v) { safeSet("rl.model", v); },
+  // Which AI writes listings on this device: "gemini" (Google's free tier) or "claude" (paid).
+  get aiProvider() { return safeGet("rl.aiProvider") || (safeGet("rl.geminiKey") ? "gemini" : safeGet("rl.apiKey") ? "claude" : "gemini"); },
+  set aiProvider(v) { safeSet("rl.aiProvider", v); },
+  get geminiKey() { return safeGet("rl.geminiKey") || ""; },
+  set geminiKey(v) { safeSet("rl.geminiKey", v); },
+  get geminiModel() { return safeGet("rl.geminiModel") || ""; },
+  set geminiModel(v) { safeSet("rl.geminiModel", v); },
+  get geminiModels() { try { return JSON.parse(safeGet("rl.geminiModels") || "[]"); } catch { return []; } },
+  set geminiModels(v) { safeSet("rl.geminiModels", JSON.stringify(v)); },
+  // True when the chosen AI has what it needs on this device.
+  get aiReady() { return this.aiProvider === "gemini" ? !!(this.geminiKey && this.geminiModel) : !!this.apiKey; },
   get fees() {
     const saved = shared.fees || {};
     return Object.fromEntries(PIDS.map((p) => [p, { ...DEFAULT_FEES[p], ...(saved[p] || {}) }]));

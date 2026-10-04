@@ -11,6 +11,7 @@ npm run test:rules   # 48 checks: outsiders, invites, joining, removing members,
 (cd .. && python3 -m http.server 8766 &)
 npm run test:e2e     # two people (Tom and Jane) sign up, share a household, list, ship, sell and relist
 node extension.test.mjs   # loads the real Chrome extension and checks the eBay/Vinted sell-page panel
+node ai.test.mjs          # Gemini client: model choice, request format, error messages, partial answers
 ```
 
 `e2e.test.mjs` options: `CHROME=/path/to/chrome` to pick a browser, `SHOTS=/some/folder` for screenshots.

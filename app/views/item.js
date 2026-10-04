@@ -178,7 +178,8 @@ export function renderItem($view, item, isNew) {
             <select id="style" class="auto">${Object.keys(DESCRIPTION_STYLES).map((k) => `<option value="${k}" ${k === settings.descStyle ? "selected" : ""}>${STYLE_LABELS[k]}</option>`).join("")}</select>
             <button class="ai-btn" id="gen" ${busy || photosLoading ? "disabled" : ""}>${busy ? `<span class="spinner"></span> Generating…` : ai ? "Regenerate listing" : "Generate listing"}</button>
           </div>
-          ${!settings.apiKey ? `<p class="small">First add a Claude API key in <a href="#/settings">Settings</a>. Everything else in the app works without it.</p>`
+          ${!settings.aiReady ? `<p class="small">First add a free Gemini key (or a Claude key) in <a href="#/settings">Settings</a>. Everything else in the app works without it.</p>`
+            : settings.aiProvider === "gemini" ? `<p class="small muted">Uses Google Gemini's free tier with the key on this device. Google may use the photos and text to improve its products.</p>`
             : `<p class="small muted">Uses the Claude API key on this device: roughly ${settings.model === "claude-sonnet-5-5" ? "3 to 8" : "5 to 15"} cents per item (more photos cost more).</p>`}
           ${ai ? `
           <div class="ai-result">
@@ -579,7 +580,7 @@ export function renderItem($view, item, isNew) {
   };
 
   const generate = async () => {
-    if (!settings.apiKey) return toast("Add your Claude API key in Settings first.", 3500);
+    if (!settings.aiReady) return toast(settings.aiProvider === "gemini" ? "Add your free Gemini key in Settings first." : "Add your Claude API key in Settings first.", 3500);
     if (!item.photos.length) return toast("Add at least one photo first.", 3500);
     if (item.ai) {
       const ok = await modal("Regenerate the listing?", "<p>This replaces the title, description, details and marketplace text with a new AI version. Price, cost, SKU, notes, labels and statuses stay.</p>", [{ value: "yes", label: "Regenerate", primary: true }]);
@@ -589,7 +590,7 @@ export function renderItem($view, item, isNew) {
     draw();
     try {
       const packaging = settings.packaging;
-      const ai = await writeListings({ apiKey: settings.apiKey, model: settings.model, photos: item.photos, price: item.overview.price, notes: item.aiNotes, style: settings.descStyle, packaging: packaging.map((p) => p.name) });
+      const ai = await writeListings({ provider: settings.aiProvider, apiKey: settings.apiKey, model: settings.model, geminiKey: settings.geminiKey, geminiModel: settings.geminiModel, photos: item.photos, price: item.overview.price, notes: item.aiNotes, style: settings.descStyle, packaging: packaging.map((p) => p.name) });
       applyAi(item, ai, packaging);
       if (!item.overview.price && ai.pricing?.suggested_price) item.overview.price = String(ai.pricing.suggested_price);
       mark(...AI_PATHS);

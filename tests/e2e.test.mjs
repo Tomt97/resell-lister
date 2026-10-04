@@ -25,6 +25,21 @@ const errors = [];
 async function newUser(label, viewport = { width: 1280, height: 900 }) {
   const ctx = await browser.newContext({ viewport });
   await ctx.route("**/app/config.js", (r) => r.fulfill({ contentType: "text/javascript", body: `export const firebaseConfig = { apiKey: "demo-key", authDomain: "demo-resell.firebaseapp.com", projectId: "demo-resell", storageBucket: "", messagingSenderId: "1", appId: "1:1:web:1" };` }));
+  // Stand-in for Google Gemini: a model list and a structured-JSON answer. Requests are kept for checks.
+  await ctx.route("https://generativelanguage.googleapis.com/**", async (r) => {
+    const url = r.request().url();
+    const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*" };
+    if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: cors });
+    if (url.includes("/models?")) return r.fulfill({ status: 200, contentType: "application/json", headers: cors, body: JSON.stringify({ models: [
+      { name: "models/gemini-2.5-flash", displayName: "Gemini 2.5 Flash", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/gemini-3-flash-lite", displayName: "Gemini 3 Flash-Lite", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/gemini-3-flash", displayName: "Gemini 3 Flash", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/gemini-3-flash-image", displayName: "Gemini 3 Flash Image", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/text-embedding-004", displayName: "Embedding", supportedGenerationMethods: ["embedContent"] },
+    ] }) });
+    globalThis.GEMINI_REQ = { url, headers: r.request().headers(), body: JSON.parse(r.request().postData()) };
+    return r.fulfill({ status: 200, contentType: "application/json", headers: cors, body: JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(fakeAi) }] } }] }) });
+  });
   await ctx.route("https://api.anthropic.com/**", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
     body: JSON.stringify({ id: "m", type: "message", role: "assistant", model: "x", stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: "text", text: JSON.stringify(fakeAi) }] }) }));
   // Stand-in for the Chrome extension's bridge: answers the app and keeps what it was sent.
@@ -110,7 +125,14 @@ check("Tom's open Settings updates to show Jane", sawJane);
 
 // ---------- Tom adds an item with photos + AI ----------
 await T.page.goto(APP + "#/settings");
-await T.page.fill("#key", "sk-ant-test"); await T.page.click("#saveKey");
+check("AI service defaults to free Gemini", (await T.page.inputValue("#aiProvider")) === "gemini" && await T.page.isHidden("#claudeBox"));
+await T.page.fill("#geminiKey", "AIza-test-key");
+await T.page.click("#saveGemini");
+await toastHas(T.page, "Gemini key saved");
+const modelOpts = await T.page.$$eval("#geminiModel option", (os) => os.map((o) => o.value));
+check("Gemini models: newest full Flash first, no image/embedding models", modelOpts.join(",") === "gemini-3-flash,gemini-3-flash-lite,gemini-2.5-flash", modelOpts.join(","));
+check("recommended model selected", (await T.page.inputValue("#geminiModel")) === "gemini-3-flash");
+await T.page.locator("#aiCard").screenshot({ path: `${SHOTS}/s-ai-card.png` });
 await T.page.goto(APP + "#/new");
 await T.page.waitForSelector("#owner");
 check("'Belongs to' defaults to Tom", (await T.page.$eval("#owner", (s) => s.options[s.selectedIndex].text)).includes("Tom"));
@@ -124,6 +146,11 @@ await T.page.click("#gen");
 await T.page.waitForSelector(".ai-result", { timeout: 15000 });
 await T.page.waitForFunction(() => document.getElementById("saveState").textContent.includes("All changes saved"), null, { timeout: 10000 });
 check("AI filled title", (await T.page.inputValue("#f-overview-title")) === fakeAi.overview.title);
+const gq = globalThis.GEMINI_REQ;
+check("Gemini call: chosen model + key header", gq.url.includes("/models/gemini-3-flash:generateContent") && gq.headers["x-goog-api-key"] === "AIza-test-key");
+check("Gemini call: 2 photos + instructions + JSON answer", gq.body.contents[0].parts.filter((p) => p.inlineData).length === 2 && gq.body.systemInstruction.parts[0].text.includes("expert US reseller") && gq.body.generationConfig.responseMimeType === "application/json");
+check("Gemini schema: capital types, no additionalProperties", gq.body.generationConfig.responseSchema.type === "OBJECT" && !JSON.stringify(gq.body.generationConfig.responseSchema).includes("additionalProperties"));
+check("item page says Gemini free tier", (await T.page.textContent(".ai-box")).includes("Gemini's free tier"));
 check("AI shipping guess: 1 lb 8 oz", (await T.page.inputValue("#f-shipping-weightLb")) === "1" && (await T.page.inputValue("#f-shipping-weightOz")) === "8");
 check("AI picked packaging -> dims 19 × 14.5 × 2", (await T.page.inputValue("#f-shipping-length")) === "19" && (await T.page.inputValue("#f-shipping-width")) === "14.5");
 check("AI guess warning shown", (await T.page.textContent("#shipCard")).includes("AI guesses"));

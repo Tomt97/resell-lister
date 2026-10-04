@@ -2,6 +2,7 @@ import * as store from "../store.js";
 import { localItems, deleteLocalItem } from "../local.js";
 import { settings, PLATFORMS, PIDS, DEFAULT_FEES, DEFAULT_RELIST, AI_MODELS, blankItem, uid, EBAY_PACKAGE_TYPES, VINTED_SIZES } from "../model.js";
 import { esc, toast, modal } from "../ui.js";
+import { listModels } from "../gemini.js";
 import { extensionReady, onExtensionReady } from "../extbridge.js";
 import { members, badge } from "./people.js";
 
@@ -55,14 +56,35 @@ export async function renderSettings($view) {
       <button id="signOut">Sign out</button>
     </section>
 
-    <section class="card">
+    <section class="card" id="aiCard">
       <h2>AI listings (this device)</h2>
-      <p class="small muted">The AI is the only part that costs money. Claude's API has no free tier: you pay Anthropic per item, roughly 5 to 15 cents with Opus or about half that with Sonnet. Everything else in the app works without it. The key is saved only on this device and sent only to Anthropic.</p>
-      <label for="key">Claude API key (from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>)</label>
-      <input id="key" type="password" autocomplete="off" placeholder="sk-ant-…" value="${esc(settings.apiKey)}">
-      <label for="model">AI model</label>
-      <select id="model">${Object.entries(AI_MODELS).map(([k, lbl]) => `<option value="${k}" ${k === settings.model ? "selected" : ""}>${esc(lbl)}</option>`).join("")}</select>
-      <div class="row" style="margin-top:10px"><button class="primary" id="saveKey">Save</button><button id="clearKey">Remove key</button></div>
+      <p class="small muted">Optional: everything else in the app works without AI. Keys are saved only on this device.</p>
+      <label for="aiProvider">AI service</label>
+      <select id="aiProvider">
+        <option value="gemini" ${settings.aiProvider === "gemini" ? "selected" : ""}>Google Gemini (free tier)</option>
+        <option value="claude" ${settings.aiProvider === "claude" ? "selected" : ""}>Claude (paid, about 5 to 15 cents an item)</option>
+      </select>
+
+      <div id="geminiBox" ${settings.aiProvider === "gemini" ? "" : "hidden"}>
+        <p class="small">Free key, no card needed: go to <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, sign in with Google, tap <b>Create API key</b>, and paste it here. Google's free tier has daily limits, and Google may use what you send (photos and text) to improve its products.</p>
+        <label for="geminiKey">Gemini API key</label>
+        <input id="geminiKey" type="password" autocomplete="off" placeholder="AIza…" value="${esc(settings.geminiKey)}">
+        <label for="geminiModel">Gemini model</label>
+        <select id="geminiModel">${settings.geminiModels.length
+          ? settings.geminiModels.map((m, i) => `<option value="${esc(m.id)}" ${m.id === settings.geminiModel ? "selected" : ""}>${esc(m.label)}${i === 0 ? " (recommended)" : ""}</option>`).join("")
+          : `<option value="">Save your key to load the models</option>`}</select>
+        <p class="small muted">The list comes from Google for your key; the first one is picked for you.</p>
+        <div class="row" style="margin-top:10px"><button class="primary" id="saveGemini">Save key and load models</button><button id="clearGemini">Remove key</button></div>
+      </div>
+
+      <div id="claudeBox" ${settings.aiProvider === "claude" ? "" : "hidden"}>
+        <p class="small">Claude's API has no free tier: you pay Anthropic per item, roughly 5 to 15 cents with Opus or about half that with Sonnet. The key is sent only to Anthropic.</p>
+        <label for="key">Claude API key (from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>)</label>
+        <input id="key" type="password" autocomplete="off" placeholder="sk-ant-…" value="${esc(settings.apiKey)}">
+        <label for="model">Claude model</label>
+        <select id="model">${Object.entries(AI_MODELS).map(([k, lbl]) => `<option value="${k}" ${k === settings.model ? "selected" : ""}>${esc(lbl)}</option>`).join("")}</select>
+        <div class="row" style="margin-top:10px"><button class="primary" id="saveKey">Save</button><button id="clearKey">Remove key</button></div>
+      </div>
     </section>
 
     <section class="card">
@@ -168,6 +190,26 @@ export async function renderSettings($view) {
   });
   $("signOut").onclick = () => store.signOutNow();
 
+  $("aiProvider").onchange = (e) => {
+    settings.aiProvider = e.target.value;
+    $("geminiBox").hidden = e.target.value !== "gemini";
+    $("claudeBox").hidden = e.target.value !== "claude";
+    toast(e.target.value === "gemini" ? "Using Google Gemini on this device" : "Using Claude on this device");
+  };
+  $("saveGemini").onclick = run(async () => {
+    const key = $("geminiKey").value.trim();
+    if (!key) return toast("Paste your Gemini key first.");
+    const models = await listModels(key);
+    if (!models.length) return toast("No Gemini text models are available for this key.", 5000);
+    settings.geminiKey = key;
+    settings.geminiModels = models;
+    if (!models.some((m) => m.id === settings.geminiModel)) settings.geminiModel = models[0].id;
+    settings.aiProvider = "gemini";
+    toast(`Gemini key saved. Using ${models.find((m) => m.id === settings.geminiModel).label}.`, 4000);
+    renderSettings($view);
+  });
+  $("geminiModel").onchange = (e) => { if (e.target.value) { settings.geminiModel = e.target.value; toast("Model saved"); } };
+  $("clearGemini").onclick = () => { settings.geminiKey = ""; settings.geminiModel = ""; settings.geminiModels = []; renderSettings($view); toast("Gemini key removed"); };
   $("saveKey").onclick = () => { settings.apiKey = $("key").value.trim(); settings.model = $("model").value; toast("Saved on this device"); };
   $("clearKey").onclick = () => { settings.apiKey = ""; $("key").value = ""; toast("Key removed"); };
 

@@ -15,7 +15,8 @@ together) to see how sales are going and which listings have gone stale and need
 |---|---|
 | Website (GitHub Pages) | Free |
 | Accounts, shared inventory, photos (Firebase free "Spark" plan) | Free, no credit card. Includes 1 GB of storage (roughly 6,000 photos) and 50,000 reads a day. |
-| AI listing writer (Claude API) | **Not free**: roughly 5 to 15 cents per item with Claude Opus 5.5, about half with Claude Sonnet 5.5. Optional: everything else works without it. |
+| AI listing writer, Google Gemini | **Free tier**: a free key, no card. Google sets daily limits and may use what you send (photos and text) to improve its products. |
+| AI listing writer, Claude (optional instead) | **Not free**: roughly 5 to 15 cents per item with Claude Opus 5.5, about half with Claude Sonnet 5.5. |
 
 ## How it works
 
@@ -99,9 +100,11 @@ Firebase's website works in a phone browser; if a button seems to be missing, us
    and text it to your partner. They open it, create their own account, and tap **Join household**.
 
 ### 4. Optional extras
-- **AI listings**: get a key at https://console.anthropic.com (**Settings → API keys**), add a little
-  credit under Billing, then paste it in the app under **Settings → AI listings**. Each device
-  keeps its own key; you can both use the same key.
+- **AI listings (free)**: go to https://aistudio.google.com/apikey, sign in with Google, tap
+  **Create API key**, then paste it in the app under **Settings → AI listings → Save key and load
+  models**. The app asks Google which free Flash models the key can use and picks the best; change it
+  there if Google retires a model. Each device keeps its own key; you can both use the same key.
+  (Prefer Claude? Pick it under **AI service** and paste a key from https://console.anthropic.com.)
 - **Install on your phone**: iPhone Safari → **Share → Add to Home Screen**. Android Chrome → **⋮ → Install app**.
 - **Chrome extension (computer)**: **Code → Download ZIP**, unzip, open `chrome://extensions`, turn on
   **Developer mode**, **Load unpacked**, and choose the `extension` folder.

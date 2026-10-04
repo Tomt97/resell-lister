@@ -5,7 +5,8 @@
   "scripts": {
     "test:rules": "firebase emulators:exec --only firestore --project demo-resell \"node rules.test.mjs\"",
     "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-resell \"node e2e.test.mjs\"",
-    "test:extension": "node extension.test.mjs"
+    "test:extension": "node extension.test.mjs",
+    "test:ai": "node ai.test.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",

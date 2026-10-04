@@ -43,7 +43,7 @@ export async function renderHome($view) {
     .slice(0, 15);
 
   const steps = [
-    { done: !!settings.apiKey, label: "Add a Claude API key on this device (for AI listings)", href: "#/settings" },
+    { done: settings.aiReady, label: "Optional: add a free Gemini key for AI listings", href: "#/settings" },
     { done: members().length > 1, label: "Invite your partner to the household", href: "#/settings" },
     { done: everything.length > 0, label: "Add your first item", href: "#/new" },
     { done: everything.some((it) => PIDS.some((p) => statusOf(it, p) !== "none")), label: "Mark an item as listed", href: "#/inventory" },

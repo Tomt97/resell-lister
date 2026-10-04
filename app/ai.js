@@ -1,6 +1,7 @@
 // Looks at the item photos and writes a listing for each marketplace.
 // Runs in the browser with the user's own Claude API key (kept in this browser only).
 import Anthropic from "./vendor/anthropic-sdk.js";
+import { generateJson } from "./gemini.js";
 
 export const MODEL = "claude-opus-5-5";
 const MAX_PHOTOS_SENT = 8;
@@ -118,10 +119,31 @@ export function makeClient(apiKey) {
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 2 });
 }
 
-// photos: [{ dataUrl }] (JPEG data URLs). Returns the parsed listing object.
-export async function writeListings({ apiKey, model = MODEL, photos, price, notes, style = "friendly", packaging = [] }) {
-  if (!apiKey) throw new Error("Add your Claude API key in Settings first.");
+const userTextFor = ({ price, notes, style, packaging }) =>
+  `Asking price: $${Number(price || 0).toFixed(2)}\n` +
+  `Seller notes: ${notes?.trim() || "(none)"}\n` +
+  `Description style: ${DESCRIPTION_STYLES[style] || DESCRIPTION_STYLES.friendly}\n` +
+  `Seller's packaging: ${packaging.length ? packaging.join("; ") : "(none listed)"}\n\nWrite the listings.`;
+
+// photos: [{ dataUrl }] (JPEG data URLs). provider: "gemini" (Google's free tier) or "claude" (paid).
+// Returns the listing object in LISTING_SCHEMA's shape.
+export async function writeListings({ provider = "claude", apiKey, model = MODEL, geminiKey, geminiModel, photos, price, notes, style = "friendly", packaging = [] }) {
   if (!photos.length) throw new Error("Add at least one photo.");
+  const userText = userTextFor({ price, notes, style, packaging });
+  if (provider === "gemini") {
+    if (!geminiKey) throw new Error("Add your free Gemini key in Settings first.");
+    if (!geminiModel) throw new Error("Pick a Gemini model in Settings first.");
+    const images = photos.slice(0, MAX_PHOTOS_SENT).map((p) => {
+      const [head, data] = p.dataUrl.split(",");
+      return { mimeType: head.slice(5, head.indexOf(";")), data };
+    });
+    return normalize(await generateJson({ key: geminiKey, model: geminiModel, system: SYSTEM, userText, images, schema: LISTING_SCHEMA }));
+  }
+  return normalize(await writeWithClaude({ apiKey, model, photos, userText }));
+}
+
+async function writeWithClaude({ apiKey, model, photos, userText }) {
+  if (!apiKey) throw new Error("Add your Claude API key in Settings first.");
   const client = makeClient(apiKey);
 
   const imageBlocks = photos.slice(0, MAX_PHOTOS_SENT).map((p) => {
@@ -144,14 +166,7 @@ export async function writeListings({ apiKey, model = MODEL, photos, price, note
           role: "user",
           content: [
             ...imageBlocks,
-            {
-              type: "text",
-              text:
-                `Asking price: $${Number(price || 0).toFixed(2)}\n` +
-                `Seller notes: ${notes?.trim() || "(none)"}\n` +
-                `Description style: ${DESCRIPTION_STYLES[style] || DESCRIPTION_STYLES.friendly}\n` +
-                `Seller's packaging: ${packaging.length ? packaging.join("; ") : "(none listed)"}\n\nWrite the listings.`,
-            },
+            { type: "text", text: userText },
           ],
         },
       ],
@@ -169,6 +184,21 @@ export async function writeListings({ apiKey, model = MODEL, photos, price, note
   const text = response.content.find((b) => b.type === "text")?.text;
   if (!text) throw new Error("Claude returned no listing. Please try again.");
   return JSON.parse(text);
+}
+
+// Fill anything missing with an empty value of the right kind, so a partial answer can't break the form.
+function normalize(ai) {
+  const fill = (schema, v) => {
+    if (schema.type === "object") {
+      const o = v && typeof v === "object" && !Array.isArray(v) ? v : {};
+      return Object.fromEntries(Object.entries(schema.properties).map(([k, ps]) => [k, fill(ps, o[k])]));
+    }
+    if (schema.type === "array") return Array.isArray(v) ? v.map((x) => fill(schema.items, x)) : [];
+    if (schema.type === "number") return Number.isFinite(+v) ? +v : 0;
+    if (schema.enum) return schema.enum.includes(v) ? v : "";
+    return typeof v === "string" ? v : v == null ? "" : String(v);
+  };
+  return fill(LISTING_SCHEMA, ai);
 }
 
 function explainApiError(err) {
