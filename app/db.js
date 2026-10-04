@@ -1,4 +1,6 @@
 // Items (with their photos) are stored in this browser's IndexedDB.
+import { migrate } from "./model.js";
+
 const DB_NAME = "resell-lister";
 const STORE = "items";
 
@@ -24,8 +26,17 @@ async function run(mode, fn) {
   });
 }
 
-export const allItems = async () =>
-  ((await run("readonly", (s) => s.getAll())) || []).sort((a, b) => b.updatedAt - a.updatedAt);
-export const getItem = (id) => run("readonly", (s) => s.get(id));
-export const putItem = (item) => run("readwrite", (s) => s.put({ ...item, updatedAt: Date.now() }));
+export const allItems = async () => ((await run("readonly", (s) => s.getAll())) || []).map(migrate);
+export const getItem = async (id) => migrate(await run("readonly", (s) => s.get(id)));
+export const putItem = (item, { touch = true } = {}) =>
+  run("readwrite", (s) => s.put(touch ? { ...item, updatedAt: Date.now() } : item));
 export const deleteItem = (id) => run("readwrite", (s) => s.delete(id));
+
+// Pages with unsaved edits register here; the router waits for them before showing the next page.
+const pending = new Set();
+export const onBeforeLeave = (fn) => { pending.add(fn); return () => pending.delete(fn); };
+export async function flushPending() {
+  const fns = [...pending];
+  pending.clear();
+  await Promise.all(fns.map((fn) => fn()));
+}

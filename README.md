@@ -9,18 +9,46 @@ site's sell form for you.
 
 ## How it works
 
-1. **New item**: add photos, your price and (optionally) what you paid and any notes.
-2. **Write my listings with AI**: Claude looks at the photos and writes a listing for each site,
-   using that site's own categories and condition wording. It also lists flaws it spotted, gives a
-   price idea and a "check before posting" list. Edit anything you like.
-3. **Send to extension**, then **Open eBay / Poshmark / Vinted**. On the sell page, click the
-   green **Resell Lister** button (bottom-right) and then **Fill this form**. It adds the photos,
-   title, description, price and brand. Category, condition, size and color menus have copy
-   buttons next to them. Check the form and press the site's own List button.
-4. When something sells, set its status to **Sold**. The app flags the other sites where it's
-   still listed so you remember to remove it there.
+The layout follows the crosslisting tools resellers already know (such as Nifty):
 
-## What it can't do (and why)
+- **Home**: getting-started checklist, today's summary (listed, sold, sales, active), and
+  **Needs attention**: items sold on one site but still listed on another, and drafts missing
+  photos, a listing or a price.
+- **Inventory**: one row per item, one column per marketplace. Each marketplace cell shows the
+  item photo with its status (Listed, Sold, Delisted), or an empty square if it isn't listed there.
+  Click a cell to change the status. Marking it sold asks for the sale price and date, then reminds
+  you where to take the listing down. Also: search (title, SKU, brand, label), status filters
+  (All, Listed, Drafts, Sold, Delisted, Needs attention, Favorites), label filters (has / without),
+  sorting, an item menu (Edit, Copy, Favorite, Send to extension, Delete), bulk actions on
+  selected items (Send to extension, Add label, Mark delisted, Delete) and 25 items per page.
+  On a phone each item becomes a card.
+- **Add item / edit item** (saves automatically):
+  1. **Marketplaces**: where you want to list it.
+  2. **Photos**: up to 24, first is the cover. Below them, the purple **Generate listing** box.
+     The AI reads up to 8 photos (including tags and handwritten measurement cards) and fills in
+     everything below. Pick a description style (Friendly, Short & simple, Detailed). You also get a
+     price idea, flaws spotted, and a check-before-posting list.
+  3. **Item overview**: title, description, condition, price, cost of goods, SKU. Shared by every
+     marketplace.
+  4. **Item details**: category, brand, size, colors, style tags.
+  5. **Only you see this**: private notes and labels.
+  6. **Marketplace details**: a tab per marketplace with its own title, category, condition,
+     specifics and price. Blank fields use the overview (shown in grey). Also the listing status.
+- **Analytics**: profit, revenue, units sold, listings created, sell-through rate, fees, average
+  sale for a time range; revenue vs profit by month; a per-marketplace table; and a sales list you
+  can download as CSV.
+- **Chrome extension**: press **Send to extension**, open a sell page, click the green
+  **Resell Lister** button and **Fill this form**. It adds the photos, title, description, price
+  and brand, with copy buttons for the rest. You press the site's own List button.
+
+## What this doesn't do (compared with Nifty)
+
+- **No account connections, so no automatic sale detection, auto-delisting, sharing, offers or
+  relisting.** Those need the marketplaces' logins and servers running all day. Here you mark
+  sales yourself, and the app reminds you what to delist.
+- **No live sold-price comparisons, photo background removal or bulk AI generation** yet.
+
+## Limits to know about
 
 - **Vinted and Poshmark have no public listing API.** The extension fills the form in your own
   logged-in browser, the same way Vendoo and Nifty work. **You** press Post. The tool doesn't post

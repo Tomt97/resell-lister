@@ -190,6 +190,7 @@
           <select class="pick">${items.map((it) => `<option value="${esc(it.id)}" ${it.id === current?.id ? "selected" : ""}>${esc(it.title)}</option>`).join("")}</select>
           <div class="thumbs">${(current.photos || []).slice(0, 8).map((p) => `<img src="${esc(p)}" alt="">`).join("")}</div>
           ${message ? `<div class="msg">${esc(message)}</div>` : ""}
+          ${!current.listing?.[siteId] ? `<p class="msg">This item isn't set to be listed on ${SITE.name}. In the app, tick ${SITE.name} under Marketplaces and press Send to extension again.</p>` : `
           <div class="row">
             <button class="primary fill">Fill this form</button>
             <button class="photos">Add photos only</button>
@@ -197,7 +198,7 @@
           <div class="f"><div class="k">Price <button data-copy="$price">Copy</button></div><div class="v">$${esc(valueFor("$price"))}</div></div>
           ${Object.keys(FIELD_LABELS).filter((k) => k in L).map((k) => `<div class="f"><div class="k">${esc(FIELD_LABELS[k] || k)} <button data-copy="${esc(k)}">Copy</button></div><div class="v">${esc(L[k])}</div></div>`).join("")}
           <p class="muted">Category, condition, size and color menus differ on every site. Pick them using the values above. Then review the form and press the site's own List button.</p>
-        `}
+        `}`}
       </div>`;
     root.querySelector(".close").onclick = () => render(false);
     const pick = root.querySelector(".pick");

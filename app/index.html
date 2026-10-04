@@ -14,15 +14,19 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="top">
-    <a class="brand" href="#/">Resell Lister</a>
-    <nav>
-      <a href="#/" data-nav="inventory">Inventory</a>
-      <a href="#/new" data-nav="new" class="primary-link">+ New item</a>
-      <a href="#/settings" data-nav="settings">Settings</a>
-    </nav>
-  </header>
-  <main id="view"></main>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Main">
+      <a class="brand" href="#/"><img src="icons/icon-192.png" alt=""><span>Resell Lister</span></a>
+      <nav class="nav">
+        <a href="#/" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></a>
+        <a href="#/inventory" data-nav="inventory"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v4H4zM4 11h16v4H4zM4 17h16v3H4z"/></svg><span>Inventory</span></a>
+        <a href="#/new" data-nav="new" class="nav-add"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z"/></svg><span>Add item</span></a>
+        <a href="#/analytics" data-nav="analytics"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10h3v10zm6.5 0V4h3v16zM17 20v-7h3v7z"/></svg><span>Analytics</span></a>
+        <a href="#/settings" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zM10.6 2h2.8l.5 2.6 1.8.8 2.2-1.5 2 2-1.5 2.2.8 1.8 2.6.5v2.8l-2.6.5-.8 1.8 1.5 2.2-2 2-2.2-1.5-1.8.8-.5 2.6h-2.8l-.5-2.6-1.8-.8-2.2 1.5-2-2 1.5-2.2-.8-1.8L2 13.4v-2.8l2.6-.5.8-1.8-1.5-2.2 2-2 2.2 1.5 1.8-.8z"/></svg><span>Settings</span></a>
+      </nav>
+    </aside>
+    <main id="view"></main>
+  </div>
   <div id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="app.js"></script>
 </body>

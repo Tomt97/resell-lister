@@ -15,13 +15,16 @@ const obj = (properties) => ({
 });
 
 export const LISTING_SCHEMA = obj({
-  item: obj({
-    what_it_is: str,
+  overview: obj({
+    title: str,
+    description: str,
+    condition: { type: "string", enum: ["New with tags", "New without tags", "Like new", "Good", "Fair", "Poor"] },
+    category: str,
     brand: str,
     size: str,
     colors: strList,
+    style_tags: strList,
     material: str,
-    department: { type: "string", enum: ["Women", "Men", "Kids", "Unisex", "Home", "Other"] },
     flaws: strList,
   }),
   ebay: obj({
@@ -37,11 +40,8 @@ export const LISTING_SCHEMA = obj({
     category: str,
     subcategory: str,
     condition: { type: "string", enum: ["New With Tags", "Like New", "Good", "Fair"] },
-    brand: str,
-    size: str,
     colors: strList,
     style_tags: strList,
-    description: str,
   }),
   vinted: obj({
     title: str,
@@ -50,11 +50,7 @@ export const LISTING_SCHEMA = obj({
       type: "string",
       enum: ["New with tags", "New without tags", "Very good", "Good", "Satisfactory"],
     },
-    brand: str,
-    size: str,
     colors: strList,
-    material: str,
-    description: str,
   }),
   pricing: obj({
     suggested_price: { type: "number" },
@@ -65,15 +61,28 @@ export const LISTING_SCHEMA = obj({
   check_before_posting: strList,
 });
 
+export const DESCRIPTION_STYLES = {
+  friendly: "Friendly and scannable: 3 to 8 short lines.",
+  short: "Short and simple: 2 to 4 short lines, facts only.",
+  detailed: "Detailed: 6 to 12 lines covering features, fit, fabric/material, condition and care.",
+};
+
 const SYSTEM = `You are an expert US reseller who writes listings that sell on eBay, Poshmark and Vinted.
-You are given photos of one item, the seller's asking price, and optional seller notes.
+You are given photos of one item, the seller's asking price, optional seller notes and a description style.
+"overview" is the shared listing used on every marketplace; the per-marketplace objects hold what has to
+differ there (titles tuned to each site, their own category menus and condition wording). Brand, size and
+description are shared from overview.
 
 Rules:
 - Only state what the photos or notes show. If the brand, size or material can't be read, use "" and add a
   line to check_before_posting (for example "Check the size tag - not visible in photos"). Never invent
   measurements, model numbers or materials.
-- List every visible flaw (stains, pilling, scuffs, holes, missing parts) in item.flaws and mention them
-  honestly in each description.
+- Read every label, tag and handwritten card in the photos (brand, size, materials, measurements, model
+  numbers).
+- List every visible flaw (stains, pilling, scuffs, holes, missing parts) in overview.flaws and mention them
+  honestly in the descriptions.
+- overview: title at most 80 characters (brand + item + key details + size). category is a plain path like
+  "Women > Tops > Blouses". colors at most 2. style_tags at most 3 short tags.
 - eBay: title at most 80 characters, keyword-first (brand, item type, key features, size, color), no
   hype words or punctuation spam. category_path is eBay US's category tree written with " > ".
   condition uses eBay US wording for that category (clothing: "New with tags", "New without tags",
@@ -86,9 +95,9 @@ Rules:
   using Poshmark color names. style_tags at most 3 short tags.
 - Vinted (US): title short and plain, about 5 to 8 words. category_path from Vinted's menus with " > "
   (e.g. Women > Clothing > Tops & t-shirts > T-shirts). colors at most 2.
-- Descriptions: friendly, scannable, 3 to 8 short lines: what it is, condition and flaws, size and fit
-  (say "see photos for measurements" unless the notes give them), and a short closing line. eBay's
-  can be the most detailed. No emojis on eBay. Plain text only, no markdown.
+- Descriptions follow the requested style. Cover what it is, condition and flaws, size and fit (say "see
+  photos for measurements" unless the photos or notes give them). The eBay description may add detail.
+  No emojis. Plain text only, no markdown.
 - pricing: give your estimate for a used-market US price from what you see; you have no live sold
   data, so set confidence honestly and say in reasoning what drives the number. The seller's own
   price is what will be used; you are only advising.
@@ -100,7 +109,7 @@ export function makeClient(apiKey) {
 }
 
 // photos: [{ dataUrl }] (JPEG data URLs). Returns the parsed listing object.
-export async function writeListings({ apiKey, photos, price, notes }) {
+export async function writeListings({ apiKey, photos, price, notes, style = "friendly" }) {
   if (!apiKey) throw new Error("Add your Claude API key in Settings first.");
   if (!photos.length) throw new Error("Add at least one photo.");
   const client = makeClient(apiKey);
@@ -129,7 +138,8 @@ export async function writeListings({ apiKey, photos, price, notes }) {
               type: "text",
               text:
                 `Asking price: $${Number(price || 0).toFixed(2)}\n` +
-                `Seller notes: ${notes?.trim() || "(none)"}\n\nWrite the listings.`,
+                `Seller notes: ${notes?.trim() || "(none)"}\n` +
+                `Description style: ${DESCRIPTION_STYLES[style] || DESCRIPTION_STYLES.friendly}\n\nWrite the listings.`,
             },
           ],
         },
@@ -158,4 +168,44 @@ function explainApiError(err) {
   if (err instanceof Anthropic.APIConnectionError) return "Couldn't reach Claude. Check your internet connection.";
   if (err instanceof Anthropic.APIError) return `Claude API error (${err.status ?? "?"}): ${err.message}`;
   return err?.message || String(err);
+}
+
+// Copy an AI answer into an item. Overwrites the listing text; keeps price, cost, SKU,
+// private notes, labels and listing statuses.
+export function applyAi(item, ai) {
+  const join = (a) => (Array.isArray(a) ? a.filter(Boolean).join(", ") : a || "");
+  const o = ai.overview;
+  item.overview = { ...item.overview, title: o.title, description: o.description, condition: o.condition };
+  item.details = { category: o.category, brand: o.brand, size: o.size, colors: join(o.colors), style_tags: join(o.style_tags) };
+  const keepPrice = (pid) => (item.market?.[pid]?.price ? { price: item.market[pid].price } : {});
+  item.market = {
+    ebay: {
+      ...keepPrice("ebay"),
+      title: ai.ebay.title,
+      category_path: ai.ebay.category_path,
+      condition: ai.ebay.condition,
+      item_specifics: (ai.ebay.item_specifics || []).map((s) => `${s.name}: ${s.value}`).join("\n"),
+      description: ai.ebay.description,
+    },
+    poshmark: {
+      ...keepPrice("poshmark"),
+      title: ai.poshmark.title,
+      department: ai.poshmark.department,
+      category: ai.poshmark.category,
+      subcategory: ai.poshmark.subcategory,
+      condition: ai.poshmark.condition,
+      colors: join(ai.poshmark.colors),
+      style_tags: join(ai.poshmark.style_tags),
+    },
+    vinted: {
+      ...keepPrice("vinted"),
+      title: ai.vinted.title,
+      category_path: ai.vinted.category_path,
+      condition: ai.vinted.condition,
+      colors: join(ai.vinted.colors),
+      material: o.material,
+    },
+  };
+  item.ai = { pricing: ai.pricing, check_before_posting: ai.check_before_posting || [], flaws: o.flaws || [] };
+  return item;
 }
