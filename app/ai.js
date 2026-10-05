@@ -127,7 +127,7 @@ const userTextFor = ({ price, notes, style, packaging }) =>
 
 // photos: [{ dataUrl }] (JPEG data URLs). provider: "gemini" (Google's free tier) or "claude" (paid).
 // Returns the listing object in LISTING_SCHEMA's shape.
-export async function writeListings({ provider = "claude", apiKey, model = MODEL, geminiKey, geminiModel, photos, price, notes, style = "friendly", packaging = [] }) {
+export async function writeListings({ provider = "claude", apiKey, model = MODEL, geminiKey, geminiModel, geminiFallbacks = [], photos, price, notes, style = "friendly", packaging = [] }) {
   if (!photos.length) throw new Error("Add at least one photo.");
   const userText = userTextFor({ price, notes, style, packaging });
   if (provider === "gemini") {
@@ -137,7 +137,7 @@ export async function writeListings({ provider = "claude", apiKey, model = MODEL
       const [head, data] = p.dataUrl.split(",");
       return { mimeType: head.slice(5, head.indexOf(";")), data };
     });
-    return normalize(await generateJson({ key: geminiKey, model: geminiModel, system: SYSTEM, userText, images, schema: LISTING_SCHEMA }));
+    return normalize(await generateJson({ key: geminiKey, model: geminiModel, fallbackModels: geminiFallbacks, system: SYSTEM, userText, images, schema: LISTING_SCHEMA }));
   }
   return normalize(await writeWithClaude({ apiKey, model, photos, userText }));
 }

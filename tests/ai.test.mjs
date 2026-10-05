@@ -45,6 +45,41 @@ const sent = JSON.parse(LAST.init.body);
 check("request: image + text parts, schema without additionalProperties", sent.contents[0].parts[0].inlineData.mimeType === "image/jpeg" && sent.contents[0].parts[1].text.includes("Poly mailer") && !JSON.stringify(sent).includes("additionalProperties"));
 check("request: enum kept, types in capitals", sent.generationConfig.responseSchema.properties.vinted.properties.condition.enum.includes("Very good") && sent.generationConfig.responseSchema.properties.overview.type === "OBJECT");
 
+// A sequence of replies, one per request, recording every request.
+const sequence = (replies) => {
+  globalThis.CALLS = [];
+  let i = 0;
+  globalThis.fetch = async (url, init) => {
+    CALLS.push({ url, body: init.body ? JSON.parse(init.body) : null });
+    const [status, body] = replies[Math.min(i++, replies.length - 1)];
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  };
+};
+const ok = (obj, extraParts = []) => [200, { candidates: [{ finishReason: "STOP", content: { parts: [...extraParts, { text: typeof obj === "string" ? obj : JSON.stringify(obj) }] } }] }];
+const boom = (status) => [status, { error: { code: status, message: status === 503 ? "The model is overloaded. Please try again later." : "Internal error encountered." } }];
+
+sequence([boom(500), ok({ overview: { title: "Plain-format retry" } })]);
+const r1 = await generateJson(args);
+check("500 then success: answer from the plain-format retry", r1.overview.title === "Plain-format retry" && CALLS.length === 2);
+check("first try enforces the format, retry describes it in the prompt",
+  !!CALLS[0].body.generationConfig.responseSchema && !CALLS[1].body.generationConfig.responseSchema && CALLS[1].body.contents[0].parts.at(-1).text.includes("JSON Schema"));
+
+sequence([boom(503), boom(503), ok({ overview: { title: "From fallback" } })]);
+const r2 = await generateJson({ ...args, fallbackModels: ["gemini-x", "gemini-y-lite", "gemini-z"] });
+check("overloaded twice: falls back to the next model", r2.overview.title === "From fallback" && CALLS[2].url.includes("/models/gemini-y-lite:"), CALLS.map((c) => c.url.split("/models/")[1]).join(" | "));
+
+sequence([boom(503)]);
+const e3 = await errorOf(generateJson({ ...args, fallbackModels: ["gemini-y", "gemini-z", "gemini-w"] }));
+check("always overloaded: 4 tries (model, plain, 2 fallbacks) then a message with Google's words", CALLS.length === 4 && e3.includes("overloaded"), e3);
+
+sequence([boom(429)]);
+await errorOf(generateJson({ ...args, fallbackModels: ["gemini-y"] }));
+check("free limit: stops after one request (no wasted retries)", CALLS.length === 1);
+
+sequence([ok("```json\n" + JSON.stringify({ overview: { title: "Fenced" } }) + "\n```", [{ text: "thinking about it", thought: true }])]);
+const r4 = await generateJson(args);
+check("ignores thinking notes and ``` fences", r4.overview.title === "Fenced");
+
 check("missing key message", (await errorOf(writeListings({ provider: "gemini", geminiKey: "", geminiModel: "m", photos: [{ dataUrl: "data:image/jpeg;base64,A" }] }))).includes("Gemini key"));
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASSED");
 process.exit(fails ? 1 : 0);

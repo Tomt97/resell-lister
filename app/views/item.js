@@ -590,7 +590,7 @@ export function renderItem($view, item, isNew) {
     draw();
     try {
       const packaging = settings.packaging;
-      const ai = await writeListings({ provider: settings.aiProvider, apiKey: settings.apiKey, model: settings.model, geminiKey: settings.geminiKey, geminiModel: settings.geminiModel, photos: item.photos, price: item.overview.price, notes: item.aiNotes, style: settings.descStyle, packaging: packaging.map((p) => p.name) });
+      const ai = await writeListings({ provider: settings.aiProvider, apiKey: settings.apiKey, model: settings.model, geminiKey: settings.geminiKey, geminiModel: settings.geminiModel, geminiFallbacks: settings.geminiModels.map((m) => m.id), photos: item.photos, price: item.overview.price, notes: item.aiNotes, style: settings.descStyle, packaging: packaging.map((p) => p.name) });
       applyAi(item, ai, packaging);
       if (!item.overview.price && ai.pricing?.suggested_price) item.overview.price = String(ai.pricing.suggested_price);
       mark(...AI_PATHS);
