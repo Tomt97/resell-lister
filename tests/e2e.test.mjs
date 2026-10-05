@@ -53,6 +53,9 @@ async function newUser(label, viewport = { width: 1280, height: 900 }) {
   });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${label}: ${e.message}`));
+  // The database closes its long-lived connections on purpose ("aborted"); anything else is reported.
+  page.on("requestfailed", (r) => { if (r.failure()?.errorText !== "net::ERR_ABORTED") errors.push(`${label} request failed: ${r.url().slice(0, 120)} ${r.failure()?.errorText}`); });
+  page.on("response", (r) => { if (r.status() >= 400 && !(label === "wrong" && r.status() === 400)) errors.push(`${label} ${r.status()}: ${r.url().slice(0, 140)}`); });
   // The "wrong" user signs in with a bad password on purpose; the browser logs that 400 itself.
   page.on("console", (m) => { if (m.type() === "error" && !(label === "wrong" && /status of 400/.test(m.text()))) errors.push(`${label} console: ${m.text()}`); });
   return { ctx, page };
